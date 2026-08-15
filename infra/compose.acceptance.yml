@@ -1,0 +1,8 @@
+services:
+  backend:
+    environment:
+      OUTBOUND_ALLOWED_HOSTS: host.docker.internal
+
+  worker:
+    environment:
+      OUTBOUND_ALLOWED_HOSTS: host.docker.internal

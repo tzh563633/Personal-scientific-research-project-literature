@@ -1,0 +1,10 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+research.db
+tests/
+requirements-dev.txt
+requirements-optional.txt

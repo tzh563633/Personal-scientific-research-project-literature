@@ -1,0 +1,4 @@
+grobid-client-python>=0.0.6
+paddleocr>=2.9
+paddlepaddle>=2.6
+

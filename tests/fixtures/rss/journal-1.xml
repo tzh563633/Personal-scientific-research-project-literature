@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>Mock Journal 1</title>
+    <link>https://example.org/journal-1</link>
+    <description>Local RSS fixture</description>
+    <item>
+      <title>Digital resilience and regional innovation</title>
+      <link>https://example.org/journal-1/item-1</link>
+      <description>A simulated article about digital resilience.</description>
+      <author>author1@example.org (Author One)</author>
+      <guid>journal-1-item-1</guid>
+    </item>
+  </channel>
+</rss>
