@@ -17,6 +17,12 @@ The completed P0 audit is recorded in
 
 P1 progress is tracked in [docs/p1-progress.md](docs/p1-progress.md).
 
+P2 plan and acceptance criteria are tracked in
+[docs/p2-plan-and-acceptance.md](docs/p2-plan-and-acceptance.md).
+
+The P2 final report is recorded in
+[docs/p2-final-report.md](docs/p2-final-report.md).
+
 The host Agent is optional for business workflows that need a Windows process:
 
 ```powershell

@@ -147,10 +147,10 @@
                   <el-icon><Folder /></el-icon>
                   {{ row.name }}
                 </el-button>
-                <span v-else>
+                <el-button v-else text @click="loadPreview(row.path)">
                   <el-icon><Document /></el-icon>
                   {{ row.name }}
-                </span>
+                </el-button>
               </template>
             </el-table-column>
             <el-table-column prop="kind" label="类型" width="100" />
@@ -166,6 +166,25 @@
             :closable="false"
             style="margin-top: 10px"
           />
+          <el-alert
+            v-if="inspection.preview?.redacted"
+            title="预览内容包含疑似密钥，已脱敏"
+            type="warning"
+            :closable="false"
+            style="margin-top: 12px"
+          />
+          <pre v-if="inspection.preview" class="code-diff">{{ inspection.preview.content }}</pre>
+          <el-tag v-if="inspection.preview?.truncated" type="warning">预览已限制为 64 KB</el-tag>
+        </el-tab-pane>
+
+        <el-tab-pane label="检查报告" name="report">
+          <div class="code-diff-toolbar">
+            <el-button @click="loadReport">
+              <el-icon><Memo /></el-icon>
+              生成报告
+            </el-button>
+          </div>
+          <pre class="code-report">{{ inspection.report?.markdown || '尚未生成报告' }}</pre>
         </el-tab-pane>
       </el-tabs>
     </el-drawer>
@@ -175,7 +194,7 @@
 <script setup>
 import { onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
-import { Document, Folder, FolderOpened, Search, Upload, View } from '@element-plus/icons-vue'
+import { Document, Folder, FolderOpened, Memo, Search, Upload, View } from '@element-plus/icons-vue'
 import api from '../api'
 
 const projects = ref([])
@@ -192,6 +211,8 @@ const inspection = reactive({
   diff: null,
   commitDetail: null,
   tree: { entries: [], truncated: false, warnings: [] },
+  preview: null,
+  report: null,
 })
 
 async function refresh() {
@@ -222,6 +243,8 @@ async function inspect(project) {
   inspection.diff = null
   inspection.commitDetail = null
   inspection.tree = { entries: [], truncated: false, warnings: [] }
+  inspection.preview = null
+  inspection.report = null
   try {
     const [status, commits, dependencies, tree] = await Promise.all([
       api.get(`/code/projects/${project.id}/git/status`),
@@ -274,6 +297,7 @@ async function loadTree() {
         params: treePath.value ? { path: treePath.value } : {},
       })
     ).data
+    inspection.preview = null
   } catch (error) {
     ElMessage.error(error.response?.data?.detail || '目录获取失败')
   }
@@ -282,6 +306,30 @@ async function loadTree() {
 async function openTreeDirectory(path) {
   treePath.value = path
   await loadTree()
+}
+
+async function loadPreview(path) {
+  if (!activeProject.value) return
+  try {
+    inspection.preview = (
+      await api.get(`/code/projects/${activeProject.value.id}/files/preview`, {
+        params: { path },
+      })
+    ).data
+  } catch (error) {
+    ElMessage.error(error.response?.data?.detail || '文件预览失败')
+  }
+}
+
+async function loadReport() {
+  if (!activeProject.value) return
+  try {
+    inspection.report = (
+      await api.get(`/code/projects/${activeProject.value.id}/inspection-report`)
+    ).data
+  } catch (error) {
+    ElMessage.error(error.response?.data?.detail || '报告生成失败')
+  }
 }
 
 function riskType(level) {
@@ -311,6 +359,16 @@ onMounted(refresh)
   padding: 12px;
   background: #111827;
   color: #d1fae5;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.code-report {
+  max-height: 520px;
+  overflow: auto;
+  padding: 12px;
+  background: #f8fafc;
+  color: #0f172a;
   white-space: pre-wrap;
   word-break: break-word;
 }

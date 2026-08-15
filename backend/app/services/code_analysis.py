@@ -11,9 +11,11 @@ from typing import Any
 
 from ..models import CodeProject
 from ..schemas import (
+    CodeInspectionReportResponse,
     DependencyAnalysisResponse,
     DependencyResponse,
     FileTreeEntryResponse,
+    FilePreviewResponse,
     FileTreeResponse,
     GitCommitResponse,
     GitCommitDetailResponse,
@@ -37,7 +39,12 @@ _MAX_SCAN_FILES = 10_000
 _MAX_DEPENDENCIES = 5_000
 _MAX_DIFF_BYTES = 200_000
 _MAX_TREE_ENTRIES = 500
+_MAX_PREVIEW_BYTES = 64 * 1024
 _REQUIREMENTS_FILES = re.compile(r"^requirements(?:[-_.].*)?\.txt$", re.IGNORECASE)
+_SECRET_PATTERNS = [
+    re.compile(r"(?i)\b(api[_-]?key|secret|token|password)\b\s*[:=]\s*([^\s'\";]+)"),
+    re.compile(r"(?i)\b(bearer)\s+([A-Za-z0-9._~+/-]{12,})"),
+]
 
 
 def project_directory(project: CodeProject) -> Path:
@@ -91,6 +98,135 @@ def list_project_tree(
         path=normalized,
         entries=entries,
         truncated=truncated,
+        warnings=warnings,
+    )
+
+
+def preview_project_file(
+    project: CodeProject,
+    relative_path: str,
+    max_bytes: int = _MAX_PREVIEW_BYTES,
+) -> FilePreviewResponse:
+    root = project_directory(project)
+    safe_path = _safe_relative_path(root, relative_path)
+    target = root / Path(*safe_path.split("/"))
+    if not target.exists() or not target.is_file():
+        raise ValueError("Project preview path is not a file")
+    if target.is_symlink():
+        raise ValueError("Project preview path cannot be a symbolic link")
+    size = target.stat().st_size
+    with target.open("rb") as handle:
+        sample = handle.read(min(max_bytes + 1, max_bytes + 4096))
+    if _looks_binary(sample[:4096]):
+        raise ValueError("Binary files cannot be previewed")
+    truncated = len(sample) > max_bytes or size > max_bytes
+    text = sample[:max_bytes].decode("utf-8-sig", errors="replace")
+    redacted_text, redacted = _redact_secrets(text)
+    return FilePreviewResponse(
+        project_id=project.id,
+        path=safe_path,
+        size_bytes=size,
+        content=redacted_text,
+        truncated=truncated,
+        redacted=redacted,
+    )
+
+
+def generate_code_inspection_report(project: CodeProject) -> CodeInspectionReportResponse:
+    warnings: list[str] = []
+    status = git_status(project)
+    commits: list[GitCommitResponse] = []
+    try:
+        commits = git_commits(project, limit=5)
+    except (ValueError, RuntimeError, FileNotFoundError) as exc:
+        warnings.append(f"Git commits: {exc}")
+    try:
+        dependencies = analyze_dependencies(project)
+    except (ValueError, OSError) as exc:
+        dependencies = DependencyAnalysisResponse(project_id=project.id, scanned_files=0)
+        warnings.append(f"Dependencies: {exc}")
+    try:
+        tree = list_project_tree(project, limit=80)
+    except (ValueError, OSError) as exc:
+        tree = FileTreeResponse(project_id=project.id)
+        warnings.append(f"File tree: {exc}")
+
+    lines = [
+        f"# Code Inspection Report: {project.name}",
+        "",
+        f"- Project ID: {project.id}",
+        f"- Generated at: {datetime.utcnow().isoformat(timespec='seconds')}Z",
+        f"- Storage path: `{project.local_path}`",
+        "",
+        "## Git",
+        "",
+    ]
+    if status.available:
+        lines.extend(
+            [
+                f"- Branch: `{status.branch or 'unknown'}`",
+                f"- Dirty: `{status.is_dirty}`",
+                f"- Ahead/behind: `{status.ahead}/{status.behind}`",
+                f"- Changed files: {len(status.changed_files)}",
+            ]
+        )
+    else:
+        lines.append(f"- Git unavailable: {status.error or 'unknown'}")
+    if commits:
+        lines.extend(["", "### Recent Commits", ""])
+        for commit in commits:
+            lines.append(f"- `{commit.commit_hash[:10]}` {commit.subject} ({commit.author})")
+
+    lines.extend(
+        [
+            "",
+            "## Dependencies",
+            "",
+            f"- Scanned files: {dependencies.scanned_files}",
+            f"- Manifests: {len(dependencies.manifests)}",
+            f"- Dependencies: {len(dependencies.dependencies)}",
+            f"- High risk: {dependencies.high_risk_count}",
+            f"- Review: {dependencies.review_count}",
+        ]
+    )
+    for dependency in dependencies.dependencies[:50]:
+        license_text = f", license={dependency.license}" if dependency.license else ""
+        source = f", source={dependency.source_url}" if dependency.source_url else ""
+        lines.append(
+            f"- `{dependency.manager}` {dependency.name} {dependency.specifier or ''} "
+            f"[{dependency.risk_level}{license_text}{source}]".strip()
+        )
+    if dependencies.warnings:
+        warnings.extend(dependencies.warnings)
+
+    lines.extend(["", "## File Tree", ""])
+    for entry in tree.entries[:80]:
+        marker = "/" if entry.kind == "directory" else ""
+        lines.append(f"- `{entry.path}{marker}`")
+    if tree.truncated:
+        warnings.append("File tree output was truncated")
+    if tree.warnings:
+        warnings.extend(tree.warnings)
+
+    lines.extend(
+        [
+            "",
+            "## Safety",
+            "",
+            "- Project code was not executed.",
+            "- Project dependencies were not installed.",
+            "- Network vulnerability databases were not queried.",
+            "- File previews are bounded and redact common secret patterns.",
+        ]
+    )
+    if warnings:
+        lines.extend(["", "## Warnings", ""])
+        for warning in warnings:
+            lines.append(f"- {warning}")
+    return CodeInspectionReportResponse(
+        project_id=project.id,
+        generated_at=datetime.utcnow(),
+        markdown="\n".join(lines).rstrip() + "\n",
         warnings=warnings,
     )
 
@@ -310,6 +446,33 @@ def _safe_relative_path(root: Path, value: str) -> str:
     if target != root and root not in target.parents:
         raise ValueError("Git path must stay inside the project")
     return "/".join(part for part in normalized.split("/") if part)
+
+
+def _looks_binary(sample: bytes) -> bool:
+    if not sample:
+        return False
+    if b"\x00" in sample:
+        return True
+    text_bytes = sum(1 for byte in sample if byte in (9, 10, 13) or 32 <= byte <= 126 or byte >= 128)
+    return text_bytes / len(sample) < 0.85
+
+
+def _redact_secrets(text: str) -> tuple[str, bool]:
+    redacted = False
+
+    def replace_key_value(match: re.Match) -> str:
+        nonlocal redacted
+        redacted = True
+        return f"{match.group(1)}=***REDACTED***"
+
+    def replace_bearer(match: re.Match) -> str:
+        nonlocal redacted
+        redacted = True
+        return f"{match.group(1)} ***REDACTED***"
+
+    value = _SECRET_PATTERNS[0].sub(replace_key_value, text)
+    value = _SECRET_PATTERNS[1].sub(replace_bearer, value)
+    return value, redacted
 
 
 def analyze_dependencies(project: CodeProject) -> DependencyAnalysisResponse:

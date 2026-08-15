@@ -25,6 +25,14 @@ API 前缀为 `/api/v1`，Swagger 文档位于 `/docs`。
 - `/excel`
 - `/journals`
 - `/code`
+- `GET /code/projects/{id}/tree?path=...`
+- `GET /code/projects/{id}/files/preview?path=...`
+- `GET /code/projects/{id}/inspection-report`
+- `GET /code/projects/{id}/dependencies`
+- `GET /code/projects/{id}/git/status`
+- `GET /code/projects/{id}/git/commits`
+- `GET /code/projects/{id}/git/commits/{hash}`
+- `GET /code/projects/{id}/git/diff?path=...`
 - `/commands`
 - `/reviews`
 - `GET /reviews/outputs/{id}/sources`

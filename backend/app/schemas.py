@@ -226,6 +226,23 @@ class FileTreeResponse(BaseModel):
     warnings: list[str] = Field(default_factory=list)
 
 
+class FilePreviewResponse(BaseModel):
+    project_id: int
+    path: str
+    size_bytes: int
+    content: str
+    truncated: bool = False
+    redacted: bool = False
+    encoding: str = "utf-8"
+
+
+class CodeInspectionReportResponse(BaseModel):
+    project_id: int
+    generated_at: datetime
+    markdown: str
+    warnings: list[str] = Field(default_factory=list)
+
+
 class CommandCreate(BaseModel):
     text: str = Field(min_length=1, max_length=2000)
 

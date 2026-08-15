@@ -165,3 +165,38 @@ def test_file_tree_is_bounded_and_skips_heavy_directories(tmp_path: Path, monkey
         assert "inside the project" in str(exc)
     else:
         raise AssertionError("tree path traversal was accepted")
+
+
+def test_file_preview_redacts_truncates_and_rejects_binary(tmp_path: Path, monkeypatch):
+    monkeypatch.setattr(settings, "storage_root", str(tmp_path))
+    project_root = tmp_path / "code" / "project-7"
+    project_root.mkdir(parents=True)
+    (project_root / "config.py").write_text("api_key=abcdef123456\n" + ("x" * 70000), encoding="utf-8")
+    (project_root / "image.bin").write_bytes(b"\x00\x01\x02\x03")
+    project = models.CodeProject(id=7, name="preview", local_path="code/project-7")
+
+    preview = code_analysis.preview_project_file(project, "config.py")
+
+    assert preview.redacted is True
+    assert preview.truncated is True
+    assert "api_key=***REDACTED***" in preview.content
+    try:
+        code_analysis.preview_project_file(project, "image.bin")
+    except ValueError as exc:
+        assert "Binary" in str(exc)
+    else:
+        raise AssertionError("binary preview was accepted")
+
+
+def test_inspection_report_summarizes_project(tmp_path: Path, monkeypatch):
+    monkeypatch.setattr(settings, "storage_root", str(tmp_path))
+    project_root = tmp_path / "code" / "project-8"
+    project_root.mkdir(parents=True)
+    (project_root / "requirements.txt").write_text("requests\n", encoding="utf-8")
+    project = models.CodeProject(id=8, name="report", local_path="code/project-8")
+
+    report = code_analysis.generate_code_inspection_report(project)
+
+    assert "# Code Inspection Report: report" in report.markdown
+    assert "Project code was not executed" in report.markdown
+    assert "Dependencies" in report.markdown

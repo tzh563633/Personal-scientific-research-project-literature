@@ -12,7 +12,9 @@ from ..dependencies import get_current_user
 from ..models import CodeProject, User
 from ..schemas import (
     CodeProjectResponse,
+    CodeInspectionReportResponse,
     DependencyAnalysisResponse,
+    FilePreviewResponse,
     FileTreeResponse,
     GitCommitResponse,
     GitCommitDetailResponse,
@@ -26,7 +28,9 @@ from ..services.code_analysis import (
     git_commits,
     git_diff,
     git_status,
+    generate_code_inspection_report,
     list_project_tree,
+    preview_project_file,
 )
 
 router = APIRouter(prefix="/code", tags=["code"])
@@ -103,6 +107,34 @@ def get_project_tree(
         return list_project_tree(project, path, limit)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.get("/projects/{project_id}/files/preview", response_model=FilePreviewResponse)
+def get_project_file_preview(
+    project_id: int,
+    path: str = Query(min_length=1, max_length=255),
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    project = db.get(CodeProject, project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    try:
+        return preview_project_file(project, path)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.get("/projects/{project_id}/inspection-report", response_model=CodeInspectionReportResponse)
+def get_project_inspection_report(
+    project_id: int,
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    project = db.get(CodeProject, project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    return generate_code_inspection_report(project)
 
 
 @router.get("/projects/{project_id}/git/commits", response_model=list[GitCommitResponse])
