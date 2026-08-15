@@ -16,6 +16,7 @@ from backend.app.main import app
 
 def test_uploaded_code_project_can_be_inspected(tmp_path: Path, monkeypatch):
     monkeypatch.setattr(settings, "storage_root", str(tmp_path / "storage"))
+    monkeypatch.setattr(settings, "osv_enabled", False)
     engine = create_engine(
         f"sqlite:///{tmp_path / 'api.db'}",
         connect_args={"check_same_thread": False},
@@ -39,7 +40,7 @@ def test_uploaded_code_project_can_be_inspected(tmp_path: Path, monkeypatch):
         archive = io.BytesIO()
         with zipfile.ZipFile(archive, "w") as handle:
             handle.writestr("src/app.py", "api_key=abcdef123456\nprint('ok')\n")
-            handle.writestr("requirements.txt", "requests\nfastapi>=0.100\n")
+            handle.writestr("requirements.txt", "requests\nfastapi>=0.100\nunsafe-demo==1.0.0\n")
             handle.writestr(
                 "package-lock.json",
                 json.dumps(
@@ -66,6 +67,7 @@ def test_uploaded_code_project_can_be_inspected(tmp_path: Path, monkeypatch):
         )
         assert upload.status_code == 200
         project_id = upload.json()["id"]
+        assert not list((tmp_path / "storage" / "code").glob("*.zip"))
 
         tree = client.get(f"/api/v1/code/projects/{project_id}/tree")
         assert tree.status_code == 200
@@ -77,6 +79,18 @@ def test_uploaded_code_project_can_be_inspected(tmp_path: Path, monkeypatch):
         assert body["high_risk_count"] == 1
         assert body["review_count"] == 1
         assert any(item["license"] == "MIT" for item in body["dependencies"])
+
+        audit = client.get(f"/api/v1/code/projects/{project_id}/security-audit")
+        assert audit.status_code == 200
+        audit_body = audit.json()
+        assert audit_body["vulnerability_count"] == 1
+        assert audit_body["highest_severity"] == "high"
+        assert audit_body["osv_enabled"] is False
+        assert any(
+            vulnerability["id"] == "LOCAL-PY-DEMO-0001"
+            for finding in audit_body["findings"]
+            for vulnerability in finding["vulnerabilities"]
+        )
 
         preview = client.get(
             f"/api/v1/code/projects/{project_id}/files/preview",
@@ -95,6 +109,7 @@ def test_uploaded_code_project_can_be_inspected(tmp_path: Path, monkeypatch):
         report = client.get(f"/api/v1/code/projects/{project_id}/inspection-report")
         assert report.status_code == 200
         assert "Code Inspection Report: api-inspection" in report.json()["markdown"]
+        assert "Security Audit" in report.json()["markdown"]
         assert "Project code was not executed" in report.json()["markdown"]
 
         with Session(engine) as db:

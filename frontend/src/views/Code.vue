@@ -132,6 +132,56 @@
           />
         </el-tab-pane>
 
+        <el-tab-pane label="安全审计" name="security">
+          <div class="dependency-summary">
+            <el-tag type="danger">漏洞 {{ inspection.securityAudit.vulnerability_count }}</el-tag>
+            <el-tag type="warning">最高 {{ inspection.securityAudit.highest_severity }}</el-tag>
+            <el-tag type="warning">许可证复核 {{ inspection.securityAudit.license_review_count }}</el-tag>
+            <el-tag type="danger">许可证限制 {{ inspection.securityAudit.license_restricted_count }}</el-tag>
+            <span class="muted">未固定 {{ inspection.securityAudit.unpinned_count }}</span>
+          </div>
+          <el-table :data="inspection.securityAudit.findings" max-height="420">
+            <el-table-column prop="name" label="依赖" min-width="150" />
+            <el-table-column prop="manager" label="管理器" width="90" />
+            <el-table-column label="版本" min-width="130">
+              <template #default="{ row }">
+                {{ row.version || row.specifier || '未固定' }}
+              </template>
+            </el-table-column>
+            <el-table-column label="许可证" width="130">
+              <template #default="{ row }">
+                <el-tag :type="licenseType(row.license_status)">
+                  {{ row.license_status }}
+                </el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column label="漏洞" min-width="180">
+              <template #default="{ row }">
+                <div v-if="row.vulnerabilities?.length" class="vulnerability-list">
+                  <el-tag
+                    v-for="vulnerability in row.vulnerabilities"
+                    :key="vulnerability.id"
+                    :type="severityType(vulnerability.severity)"
+                    effect="plain"
+                  >
+                    {{ vulnerability.id }}
+                  </el-tag>
+                </div>
+                <span v-else class="muted">无</span>
+              </template>
+            </el-table-column>
+            <el-table-column prop="recommendation" label="建议" min-width="220" />
+          </el-table>
+          <el-alert
+            v-for="warning in inspection.securityAudit.warnings"
+            :key="warning"
+            :title="warning"
+            type="warning"
+            :closable="false"
+            style="margin-top: 10px"
+          />
+        </el-tab-pane>
+
         <el-tab-pane label="文件树" name="tree">
           <div class="code-diff-toolbar">
             <el-input v-model="treePath" clearable placeholder="可选：进入相对目录" />
@@ -208,6 +258,15 @@ const inspection = reactive({
   status: null,
   commits: [],
   dependencies: { dependencies: [], high_risk_count: 0, review_count: 0, scanned_files: 0, warnings: [] },
+  securityAudit: {
+    findings: [],
+    vulnerability_count: 0,
+    highest_severity: 'none',
+    license_review_count: 0,
+    license_restricted_count: 0,
+    unpinned_count: 0,
+    warnings: [],
+  },
   diff: null,
   commitDetail: null,
   tree: { entries: [], truncated: false, warnings: [] },
@@ -242,19 +301,30 @@ async function inspect(project) {
   inspection.commits = []
   inspection.diff = null
   inspection.commitDetail = null
+  inspection.securityAudit = {
+    findings: [],
+    vulnerability_count: 0,
+    highest_severity: 'none',
+    license_review_count: 0,
+    license_restricted_count: 0,
+    unpinned_count: 0,
+    warnings: [],
+  }
   inspection.tree = { entries: [], truncated: false, warnings: [] }
   inspection.preview = null
   inspection.report = null
   try {
-    const [status, commits, dependencies, tree] = await Promise.all([
+    const [status, commits, dependencies, securityAudit, tree] = await Promise.all([
       api.get(`/code/projects/${project.id}/git/status`),
       api.get(`/code/projects/${project.id}/git/commits`),
       api.get(`/code/projects/${project.id}/dependencies`),
+      api.get(`/code/projects/${project.id}/security-audit`),
       api.get(`/code/projects/${project.id}/tree`),
     ])
     inspection.status = status.data
     inspection.commits = commits.data
     inspection.dependencies = dependencies.data
+    inspection.securityAudit = securityAudit.data
     inspection.tree = tree.data
   } catch (error) {
     ElMessage.error(error.response?.data?.detail || '项目检查失败')
@@ -336,6 +406,14 @@ function riskType(level) {
   return { high: 'danger', review: 'warning', low: 'success' }[level] || 'info'
 }
 
+function licenseType(status) {
+  return { restricted: 'danger', review: 'warning', allowed: 'success' }[status] || 'info'
+}
+
+function severityType(severity) {
+  return { critical: 'danger', high: 'danger', medium: 'warning', low: 'info' }[severity] || 'info'
+}
+
 onMounted(refresh)
 </script>
 
@@ -378,6 +456,12 @@ onMounted(refresh)
   align-items: center;
   gap: 10px;
   margin-bottom: 12px;
+}
+
+.vulnerability-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
 }
 
 .muted {

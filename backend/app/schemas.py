@@ -210,6 +210,51 @@ class DependencyAnalysisResponse(BaseModel):
     review_count: int = 0
 
 
+class VulnerabilityResponse(BaseModel):
+    id: str
+    summary: str | None = None
+    severity: str = "unknown"
+    affected_versions: list[str] = Field(default_factory=list)
+    fixed_version: str | None = None
+    source: str = "local"
+
+
+class DependencySecurityFindingResponse(BaseModel):
+    manager: str
+    name: str
+    specifier: str | None = None
+    version: str | None = None
+    purl: str | None = None
+    source_file: str
+    risk_level: str
+    risk_reason: str | None = None
+    license: str | None = None
+    license_status: str = "unknown"
+    license_reason: str | None = None
+    vulnerabilities: list[VulnerabilityResponse] = Field(default_factory=list)
+    recommendation: str
+
+
+class CodeSecurityAuditResponse(BaseModel):
+    project_id: int
+    generated_at: datetime
+    dependency_count: int = 0
+    pinned_count: int = 0
+    unpinned_count: int = 0
+    high_risk_count: int = 0
+    review_count: int = 0
+    license_allowed_count: int = 0
+    license_review_count: int = 0
+    license_restricted_count: int = 0
+    vulnerability_count: int = 0
+    vulnerable_dependency_count: int = 0
+    highest_severity: str = "none"
+    osv_enabled: bool = False
+    offline_database: str | None = None
+    findings: list[DependencySecurityFindingResponse] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+
+
 class FileTreeEntryResponse(BaseModel):
     name: str
     path: str

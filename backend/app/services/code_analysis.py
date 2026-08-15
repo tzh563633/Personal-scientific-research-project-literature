@@ -9,9 +9,14 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+import httpx
+
+from ..config import settings
 from ..models import CodeProject
 from ..schemas import (
+    CodeSecurityAuditResponse,
     CodeInspectionReportResponse,
+    DependencySecurityFindingResponse,
     DependencyAnalysisResponse,
     DependencyResponse,
     FileTreeEntryResponse,
@@ -21,6 +26,7 @@ from ..schemas import (
     GitCommitDetailResponse,
     GitDiffResponse,
     GitStatusResponse,
+    VulnerabilityResponse,
 )
 from .files import absolute_storage_path
 
@@ -45,6 +51,18 @@ _SECRET_PATTERNS = [
     re.compile(r"(?i)\b(api[_-]?key|secret|token|password)\b\s*[:=]\s*([^\s'\";]+)"),
     re.compile(r"(?i)\b(bearer)\s+([A-Za-z0-9._~+/-]{12,})"),
 ]
+_ALLOWED_LICENSE_MARKERS = ("MIT", "BSD", "APACHE", "ISC")
+_REVIEW_LICENSE_MARKERS = ("LGPL",)
+_RESTRICTED_LICENSE_MARKERS = ("AGPL", "GPL")
+_SEVERITY_RANK = {
+    "none": 0,
+    "unknown": 0,
+    "low": 1,
+    "moderate": 2,
+    "medium": 2,
+    "high": 3,
+    "critical": 4,
+}
 
 
 def project_directory(project: CodeProject) -> Path:
@@ -146,6 +164,11 @@ def generate_code_inspection_report(project: CodeProject) -> CodeInspectionRepor
         dependencies = DependencyAnalysisResponse(project_id=project.id, scanned_files=0)
         warnings.append(f"Dependencies: {exc}")
     try:
+        security_audit = audit_project_security(project, dependencies)
+    except (ValueError, OSError) as exc:
+        security_audit = CodeSecurityAuditResponse(project_id=project.id, generated_at=datetime.utcnow())
+        warnings.append(f"Security audit: {exc}")
+    try:
         tree = list_project_tree(project, limit=80)
     except (ValueError, OSError) as exc:
         tree = FileTreeResponse(project_id=project.id)
@@ -196,8 +219,29 @@ def generate_code_inspection_report(project: CodeProject) -> CodeInspectionRepor
             f"- `{dependency.manager}` {dependency.name} {dependency.specifier or ''} "
             f"[{dependency.risk_level}{license_text}{source}]".strip()
         )
-    if dependencies.warnings:
-        warnings.extend(dependencies.warnings)
+    lines.extend(
+        [
+            "",
+            "## Security Audit",
+            "",
+            f"- Pinned dependencies: {security_audit.pinned_count}",
+            f"- Unpinned dependencies: {security_audit.unpinned_count}",
+            f"- Vulnerabilities: {security_audit.vulnerability_count}",
+            f"- Vulnerable dependencies: {security_audit.vulnerable_dependency_count}",
+            f"- Highest severity: {security_audit.highest_severity}",
+            f"- License review: {security_audit.license_review_count}",
+            f"- License restricted: {security_audit.license_restricted_count}",
+            f"- OSV enabled: `{security_audit.osv_enabled}`",
+        ]
+    )
+    for finding in security_audit.findings[:50]:
+        vulnerability_ids = ", ".join(item.id for item in finding.vulnerabilities) or "none"
+        lines.append(
+            f"- `{finding.manager}` {finding.name} {finding.version or finding.specifier or ''} "
+            f"[license={finding.license_status}, vulnerabilities={vulnerability_ids}]".strip()
+        )
+    if security_audit.warnings:
+        warnings.extend(security_audit.warnings)
 
     lines.extend(["", "## File Tree", ""])
     for entry in tree.entries[:80]:
@@ -215,7 +259,7 @@ def generate_code_inspection_report(project: CodeProject) -> CodeInspectionRepor
             "",
             "- Project code was not executed.",
             "- Project dependencies were not installed.",
-            "- Network vulnerability databases were not queried.",
+            "- Network vulnerability databases are disabled by default and only queried when OSV is explicitly enabled.",
             "- File previews are bounded and redact common secret patterns.",
         ]
     )
@@ -227,6 +271,77 @@ def generate_code_inspection_report(project: CodeProject) -> CodeInspectionRepor
         project_id=project.id,
         generated_at=datetime.utcnow(),
         markdown="\n".join(lines).rstrip() + "\n",
+        warnings=warnings,
+    )
+
+
+def audit_project_security(
+    project: CodeProject,
+    dependency_analysis: DependencyAnalysisResponse | None = None,
+) -> CodeSecurityAuditResponse:
+    dependencies = dependency_analysis or analyze_dependencies(project)
+    warnings = list(dependencies.warnings)
+    local_vulnerabilities, local_db_path, local_warnings = _load_local_vulnerability_database()
+    warnings.extend(local_warnings)
+
+    findings: list[DependencySecurityFindingResponse] = []
+    for dependency in dependencies.dependencies:
+        version = _extract_pinned_version(dependency.specifier)
+        ecosystem = _ecosystem_for_manager(dependency.manager)
+        vulnerabilities = _match_local_vulnerabilities(local_vulnerabilities, ecosystem, dependency.name, version)
+        license_status, license_reason = _license_policy(dependency.license)
+        findings.append(
+            DependencySecurityFindingResponse(
+                manager=dependency.manager,
+                name=dependency.name,
+                specifier=dependency.specifier,
+                version=version,
+                purl=_package_url(ecosystem, dependency.name, version),
+                source_file=dependency.source_file,
+                risk_level=dependency.risk_level,
+                risk_reason=dependency.risk_reason,
+                license=dependency.license,
+                license_status=license_status,
+                license_reason=license_reason,
+                vulnerabilities=vulnerabilities,
+                recommendation=_security_recommendation(
+                    dependency,
+                    version,
+                    vulnerabilities,
+                    license_status,
+                ),
+            )
+        )
+
+    if settings.osv_enabled:
+        try:
+            _merge_osv_vulnerabilities(findings)
+        except (httpx.HTTPError, ValueError, KeyError, TypeError) as exc:
+            warnings.append(f"OSV query failed; local audit was kept: {exc}")
+    else:
+        warnings.append("OSV query disabled; local vulnerability database used only.")
+
+    vulnerability_count = sum(len(item.vulnerabilities) for item in findings)
+    highest_severity = _highest_severity(
+        vulnerability.severity for finding in findings for vulnerability in finding.vulnerabilities
+    )
+    return CodeSecurityAuditResponse(
+        project_id=project.id,
+        generated_at=datetime.utcnow(),
+        dependency_count=len(findings),
+        pinned_count=sum(1 for item in findings if item.version),
+        unpinned_count=sum(1 for item in findings if not item.version),
+        high_risk_count=sum(1 for item in findings if item.risk_level == "high"),
+        review_count=sum(1 for item in findings if item.risk_level == "review"),
+        license_allowed_count=sum(1 for item in findings if item.license_status == "allowed"),
+        license_review_count=sum(1 for item in findings if item.license_status == "review"),
+        license_restricted_count=sum(1 for item in findings if item.license_status == "restricted"),
+        vulnerability_count=vulnerability_count,
+        vulnerable_dependency_count=sum(1 for item in findings if item.vulnerabilities),
+        highest_severity=highest_severity,
+        osv_enabled=settings.osv_enabled,
+        offline_database=local_db_path.as_posix() if local_db_path else None,
+        findings=findings,
         warnings=warnings,
     )
 
@@ -742,6 +857,276 @@ def _dependency_risk(
     if value.startswith(("^", "~")) or any(marker in value for marker in (">", "<", "*")):
         return "review", "Version range may change during installation"
     return "low", None
+
+
+def _extract_pinned_version(specifier: str | None) -> str | None:
+    if not specifier:
+        return None
+    value = specifier.strip()
+    if not value:
+        return None
+    for prefix in ("===", "=="):
+        if value.startswith(prefix):
+            return _clean_version(value[len(prefix) :])
+    if value.startswith("=") and not value.startswith(("=>", "=<")):
+        return _clean_version(value[1:])
+    if re.fullmatch(r"v?\d+(?:[.\-_][A-Za-z0-9]+)*", value):
+        return _clean_version(value)
+    return None
+
+
+def _clean_version(value: str) -> str | None:
+    version = value.strip().strip("\"'").removeprefix("v")
+    if not version or any(marker in version for marker in (" ", ",", ";", "<", ">", "*")):
+        return None
+    return version
+
+
+def _ecosystem_for_manager(manager: str) -> str | None:
+    if manager in {"pip", "pipenv-lock", "poetry-lock"}:
+        return "PyPI"
+    if manager in {"npm", "npm-lock"}:
+        return "npm"
+    return None
+
+
+def _package_url(ecosystem: str | None, name: str, version: str | None) -> str | None:
+    if not ecosystem or not version:
+        return None
+    package = name.lower()
+    if ecosystem == "PyPI":
+        return f"pkg:pypi/{package}@{version}"
+    if ecosystem == "npm":
+        npm_name = package.replace("/", "%2f")
+        return f"pkg:npm/{npm_name}@{version}"
+    return None
+
+
+def _license_policy(license_text: str | None) -> tuple[str, str | None]:
+    if not license_text:
+        return "review", "License metadata is missing"
+    normalized = re.sub(r"[^A-Za-z0-9.+-]+", " ", license_text).upper()
+    if any(marker in normalized for marker in _REVIEW_LICENSE_MARKERS):
+        return "review", "Weak copyleft license should be reviewed"
+    if any(marker in normalized for marker in _RESTRICTED_LICENSE_MARKERS):
+        return "restricted", "Copyleft license requires project-specific review"
+    if any(marker in normalized for marker in _ALLOWED_LICENSE_MARKERS):
+        return "allowed", None
+    return "review", "License is not in the default allow list"
+
+
+def _security_recommendation(
+    dependency: DependencyResponse,
+    version: str | None,
+    vulnerabilities: list[VulnerabilityResponse],
+    license_status: str,
+) -> str:
+    if vulnerabilities:
+        fixed_versions = sorted({item.fixed_version for item in vulnerabilities if item.fixed_version})
+        if fixed_versions:
+            return f"Upgrade to at least {fixed_versions[-1]} and retest."
+        return "Review vulnerability advisory and replace or upgrade this dependency."
+    if not version:
+        return "Pin this dependency to an exact version before release."
+    if dependency.risk_level == "high":
+        return dependency.risk_reason or "Review high-risk dependency source."
+    if license_status == "restricted":
+        return "Review license obligations before using this dependency."
+    if license_status == "review":
+        return "Confirm license metadata and intended use."
+    return "No immediate action required."
+
+
+def _load_local_vulnerability_database() -> tuple[list[dict[str, Any]], Path | None, list[str]]:
+    warnings: list[str] = []
+    configured = Path(settings.local_vulnerability_db_path)
+    fallback = Path(__file__).resolve().parents[1] / "data" / "local_vulnerabilities.json"
+    path = configured if configured.exists() else fallback
+    if not path.exists():
+        return [], None, [f"Local vulnerability database not found: {configured}"]
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        return [], path, [f"Local vulnerability database could not be loaded: {exc}"]
+    if not isinstance(data, list):
+        return [], path, ["Local vulnerability database must contain a list"]
+    return [item for item in data if isinstance(item, dict)], path, warnings
+
+
+def _match_local_vulnerabilities(
+    database: list[dict[str, Any]],
+    ecosystem: str | None,
+    package_name: str,
+    version: str | None,
+) -> list[VulnerabilityResponse]:
+    if not ecosystem or not version:
+        return []
+    result: list[VulnerabilityResponse] = []
+    package_key = package_name.lower()
+    for item in database:
+        if str(item.get("ecosystem", "")).lower() != ecosystem.lower():
+            continue
+        if str(item.get("package", "")).lower() != package_key:
+            continue
+        ranges = [str(value) for value in item.get("affected_versions", []) or []]
+        if not ranges or any(_version_matches_range(version, value) for value in ranges):
+            result.append(
+                VulnerabilityResponse(
+                    id=str(item.get("id") or "LOCAL-UNKNOWN"),
+                    summary=_stringify_optional(item.get("summary")),
+                    severity=_normalize_severity(_stringify_optional(item.get("severity"))),
+                    affected_versions=ranges,
+                    fixed_version=_stringify_optional(item.get("fixed_version")),
+                    source="local",
+                )
+            )
+    return result
+
+
+def _version_matches_range(version: str, expression: str) -> bool:
+    checks = [part.strip() for part in expression.split(",") if part.strip()]
+    if not checks:
+        return False
+    return all(_version_matches_single_check(version, check) for check in checks)
+
+
+def _version_matches_single_check(version: str, expression: str) -> bool:
+    match = re.fullmatch(r"(<=|>=|<|>|==|=)?\s*v?([A-Za-z0-9_.+-]+)", expression.strip())
+    if not match:
+        return False
+    operator = match.group(1) or "=="
+    comparison = _compare_versions(version, match.group(2))
+    if operator in {"==", "="}:
+        return comparison == 0
+    if operator == "<":
+        return comparison < 0
+    if operator == "<=":
+        return comparison <= 0
+    if operator == ">":
+        return comparison > 0
+    if operator == ">=":
+        return comparison >= 0
+    return False
+
+
+def _compare_versions(left: str, right: str) -> int:
+    left_parts = _version_parts(left)
+    right_parts = _version_parts(right)
+    length = max(len(left_parts), len(right_parts))
+    left_parts.extend([0] * (length - len(left_parts)))
+    right_parts.extend([0] * (length - len(right_parts)))
+    if left_parts < right_parts:
+        return -1
+    if left_parts > right_parts:
+        return 1
+    return 0
+
+
+def _version_parts(value: str) -> list[int]:
+    parts = [int(match) for match in re.findall(r"\d+", value)]
+    return parts or [0]
+
+
+def _merge_osv_vulnerabilities(findings: list[DependencySecurityFindingResponse]) -> None:
+    queries: list[dict[str, Any]] = []
+    query_indexes: list[int] = []
+    for index, finding in enumerate(findings):
+        ecosystem = _ecosystem_for_manager(finding.manager)
+        if not ecosystem or not finding.version:
+            continue
+        queries.append(
+            {
+                "package": {
+                    "name": finding.name,
+                    "ecosystem": ecosystem,
+                },
+                "version": finding.version,
+            }
+        )
+        query_indexes.append(index)
+    if not queries:
+        return
+    with httpx.Client(timeout=10) as client:
+        response = client.post(settings.osv_api_url, json={"queries": queries})
+        response.raise_for_status()
+    document = response.json()
+    results = document.get("results", [])
+    if not isinstance(results, list):
+        raise ValueError("OSV response did not contain result list")
+    for result_index, item in enumerate(results):
+        if result_index >= len(query_indexes) or not isinstance(item, dict):
+            continue
+        vulnerabilities = item.get("vulns", []) or []
+        if not isinstance(vulnerabilities, list):
+            continue
+        finding = findings[query_indexes[result_index]]
+        known_ids = {value.id for value in finding.vulnerabilities}
+        for vulnerability in vulnerabilities:
+            if not isinstance(vulnerability, dict):
+                continue
+            vulnerability_id = str(vulnerability.get("id") or "")
+            if not vulnerability_id or vulnerability_id in known_ids:
+                continue
+            finding.vulnerabilities.append(
+                VulnerabilityResponse(
+                    id=vulnerability_id,
+                    summary=_stringify_optional(vulnerability.get("summary")),
+                    severity=_osv_severity(vulnerability),
+                    fixed_version=_osv_fixed_version(vulnerability),
+                    source="osv",
+                )
+            )
+
+
+def _osv_severity(vulnerability: dict[str, Any]) -> str:
+    database_specific = vulnerability.get("database_specific")
+    if isinstance(database_specific, dict) and database_specific.get("severity"):
+        return _normalize_severity(str(database_specific["severity"]))
+    severities = vulnerability.get("severity")
+    if isinstance(severities, list) and severities:
+        first = severities[0]
+        if isinstance(first, dict) and first.get("score"):
+            return _normalize_severity(str(first["score"]))
+    return "unknown"
+
+
+def _osv_fixed_version(vulnerability: dict[str, Any]) -> str | None:
+    affected = vulnerability.get("affected")
+    if not isinstance(affected, list):
+        return None
+    versions: list[str] = []
+    for item in affected:
+        if not isinstance(item, dict):
+            continue
+        for range_item in item.get("ranges", []) or []:
+            if not isinstance(range_item, dict):
+                continue
+            for event in range_item.get("events", []) or []:
+                if isinstance(event, dict) and event.get("fixed"):
+                    versions.append(str(event["fixed"]))
+    return sorted(versions, key=_version_parts)[-1] if versions else None
+
+
+def _highest_severity(values) -> str:
+    highest = "none"
+    for value in values:
+        normalized = _normalize_severity(str(value))
+        if _SEVERITY_RANK.get(normalized, 0) > _SEVERITY_RANK.get(highest, 0):
+            highest = normalized
+    return highest
+
+
+def _normalize_severity(value: str | None) -> str:
+    if not value:
+        return "unknown"
+    normalized = value.strip().lower()
+    if normalized in {"moderate", "medium"}:
+        return "medium"
+    if normalized in _SEVERITY_RANK:
+        return normalized
+    if normalized.startswith("cvss"):
+        return "unknown"
+    return normalized
 
 
 def _stringify_optional(value: Any) -> str | None:

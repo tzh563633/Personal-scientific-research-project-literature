@@ -200,3 +200,131 @@ def test_inspection_report_summarizes_project(tmp_path: Path, monkeypatch):
     assert "# Code Inspection Report: report" in report.markdown
     assert "Project code was not executed" in report.markdown
     assert "Dependencies" in report.markdown
+
+
+def test_security_audit_uses_local_vulnerability_db_and_license_policy(tmp_path: Path, monkeypatch):
+    monkeypatch.setattr(settings, "storage_root", str(tmp_path))
+    monkeypatch.setattr(settings, "osv_enabled", False)
+    project_root = tmp_path / "code" / "project-9"
+    project_root.mkdir(parents=True)
+    (project_root / "requirements.txt").write_text(
+        "unsafe-demo==1.0.0\nfloating-demo>=0.1\n",
+        encoding="utf-8",
+    )
+    (project_root / "poetry.lock").write_text(
+        '[[package]]\nname = "copyleft-lib"\nversion = "2.0.0"\nlicense = "GPL-3.0"\n',
+        encoding="utf-8",
+    )
+    project = models.CodeProject(id=9, name="security", local_path="code/project-9")
+
+    audit = code_analysis.audit_project_security(project)
+
+    assert audit.dependency_count == 3
+    assert audit.pinned_count == 2
+    assert audit.unpinned_count == 1
+    assert audit.vulnerability_count == 1
+    assert audit.vulnerable_dependency_count == 1
+    assert audit.highest_severity == "high"
+    vulnerable = next(item for item in audit.findings if item.name == "unsafe-demo")
+    assert vulnerable.purl == "pkg:pypi/unsafe-demo@1.0.0"
+    assert vulnerable.vulnerabilities[0].id == "LOCAL-PY-DEMO-0001"
+    assert "Upgrade to at least 1.0.1" in vulnerable.recommendation
+    floating = next(item for item in audit.findings if item.name == "floating-demo")
+    assert floating.version is None
+    assert "Pin this dependency" in floating.recommendation
+    copyleft = next(item for item in audit.findings if item.name == "copyleft-lib")
+    assert copyleft.license_status == "restricted"
+    assert audit.license_restricted_count == 1
+    assert any("OSV query disabled" in warning for warning in audit.warnings)
+    assert code_analysis._license_policy("LGPL-3.0")[0] == "review"
+
+
+def test_security_audit_keeps_local_results_when_osv_fails(tmp_path: Path, monkeypatch):
+    monkeypatch.setattr(settings, "storage_root", str(tmp_path))
+    monkeypatch.setattr(settings, "osv_enabled", True)
+    project_root = tmp_path / "code" / "project-10"
+    project_root.mkdir(parents=True)
+    (project_root / "package-lock.json").write_text(
+        json.dumps(
+            {
+                "packages": {
+                    "": {},
+                    "node_modules/legacy-js-lib": {
+                        "version": "1.5.0",
+                        "license": "MIT",
+                    },
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    project = models.CodeProject(id=10, name="osv-fallback", local_path="code/project-10")
+
+    def fail_osv(findings):
+        raise code_analysis.httpx.ConnectError("network unavailable")
+
+    monkeypatch.setattr(code_analysis, "_merge_osv_vulnerabilities", fail_osv)
+
+    audit = code_analysis.audit_project_security(project)
+
+    assert audit.osv_enabled is True
+    assert audit.vulnerability_count == 1
+    assert audit.findings[0].vulnerabilities[0].id == "LOCAL-NPM-DEMO-0001"
+    assert any("OSV query failed" in warning for warning in audit.warnings)
+
+
+def test_security_audit_merges_optional_osv_provider_results(tmp_path: Path, monkeypatch):
+    monkeypatch.setattr(settings, "storage_root", str(tmp_path))
+    monkeypatch.setattr(settings, "osv_enabled", True)
+    project_root = tmp_path / "code" / "project-11"
+    project_root.mkdir(parents=True)
+    (project_root / "requirements.txt").write_text("safe-demo==2.0.0\n", encoding="utf-8")
+    project = models.CodeProject(id=11, name="osv-success", local_path="code/project-11")
+    captured = {}
+
+    class FakeResponse:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {
+                "results": [
+                    {
+                        "vulns": [
+                            {
+                                "id": "OSV-DEMO-0001",
+                                "summary": "Fake provider result",
+                                "database_specific": {"severity": "critical"},
+                                "affected": [
+                                    {"ranges": [{"events": [{"fixed": "2.0.1"}]}]}
+                                ],
+                            }
+                        ]
+                    }
+                ]
+            }
+
+    class FakeClient:
+        def __init__(self, timeout):
+            captured["timeout"] = timeout
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc_value, traceback):
+            return False
+
+        def post(self, url, json):
+            captured["url"] = url
+            captured["json"] = json
+            return FakeResponse()
+
+    monkeypatch.setattr(code_analysis.httpx, "Client", FakeClient)
+
+    audit = code_analysis.audit_project_security(project)
+
+    assert captured["url"] == settings.osv_api_url
+    assert captured["json"]["queries"][0]["package"]["ecosystem"] == "PyPI"
+    assert audit.findings[0].vulnerabilities[0].id == "OSV-DEMO-0001"
+    assert audit.findings[0].vulnerabilities[0].source == "osv"
+    assert audit.highest_severity == "critical"

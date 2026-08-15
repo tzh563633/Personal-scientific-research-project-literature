@@ -11,6 +11,7 @@ from ..db import get_db
 from ..dependencies import get_current_user
 from ..models import CodeProject, User
 from ..schemas import (
+    CodeSecurityAuditResponse,
     CodeProjectResponse,
     CodeInspectionReportResponse,
     DependencyAnalysisResponse,
@@ -24,6 +25,7 @@ from ..schemas import (
 from ..services.files import ALLOWED_CODE_EXTENSIONS, relative_storage_path, safe_extract_archive, save_upload
 from ..services.code_analysis import (
     analyze_dependencies,
+    audit_project_security,
     git_commit_detail,
     git_commits,
     git_diff,
@@ -65,6 +67,7 @@ async def upload_code(
         shutil.rmtree(project_dir, ignore_errors=True)
         archive.unlink(missing_ok=True)
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    archive.unlink(missing_ok=True)
     project.local_path = relative_storage_path(project_dir)
     db.commit()
     db.refresh(project)
@@ -135,6 +138,21 @@ def get_project_inspection_report(
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
     return generate_code_inspection_report(project)
+
+
+@router.get("/projects/{project_id}/security-audit", response_model=CodeSecurityAuditResponse)
+def get_project_security_audit(
+    project_id: int,
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    project = db.get(CodeProject, project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    try:
+        return audit_project_security(project)
+    except (ValueError, OSError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 @router.get("/projects/{project_id}/git/commits", response_model=list[GitCommitResponse])

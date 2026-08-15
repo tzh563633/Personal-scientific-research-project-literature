@@ -23,6 +23,9 @@ P2 plan and acceptance criteria are tracked in
 The P2 final report is recorded in
 [docs/p2-final-report.md](docs/p2-final-report.md).
 
+P3 plan and acceptance criteria are tracked in
+[docs/p3-plan-and-acceptance.md](docs/p3-plan-and-acceptance.md).
+
 The host Agent is optional for business workflows that need a Windows process:
 
 ```powershell

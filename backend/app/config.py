@@ -38,6 +38,9 @@ class Settings(BaseSettings):
     grobid_enabled: bool = False
     supplement_download_enabled: bool = True
     outbound_allowed_hosts: str = ""
+    osv_enabled: bool = False
+    osv_api_url: str = "https://api.osv.dev/v1/querybatch"
+    local_vulnerability_db_path: str = "./app/data/local_vulnerabilities.json"
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore", case_sensitive=False)
 

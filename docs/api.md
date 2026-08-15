@@ -29,6 +29,7 @@ API 前缀为 `/api/v1`，Swagger 文档位于 `/docs`。
 - `GET /code/projects/{id}/files/preview?path=...`
 - `GET /code/projects/{id}/inspection-report`
 - `GET /code/projects/{id}/dependencies`
+- `GET /code/projects/{id}/security-audit`
 - `GET /code/projects/{id}/git/status`
 - `GET /code/projects/{id}/git/commits`
 - `GET /code/projects/{id}/git/commits/{hash}`
@@ -40,6 +41,11 @@ API 前缀为 `/api/v1`，Swagger 文档位于 `/docs`。
 - `/agent`
 - `GET /jobs/{id}` and `POST /jobs/{id}/cancel` use the common job status
   values `pending`, `running`, `succeeded`, `failed`, and `cancelled`.
+
+`security-audit` is read-only. It analyzes dependency versions, licenses, and
+vulnerabilities. OSV querying is disabled by default; set `OSV_ENABLED=true`
+to enable the optional provider. Network failures preserve local audit results
+and are returned as warnings.
 
 所有受保护接口使用 `Authorization: Bearer <JWT>`。Agent 接口使用 `X-Agent-Token`。
 

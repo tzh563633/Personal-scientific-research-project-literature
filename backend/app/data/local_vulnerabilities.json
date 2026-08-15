@@ -1,0 +1,20 @@
+[
+  {
+    "id": "LOCAL-PY-DEMO-0001",
+    "ecosystem": "PyPI",
+    "package": "unsafe-demo",
+    "affected_versions": ["<=1.0.0"],
+    "fixed_version": "1.0.1",
+    "severity": "high",
+    "summary": "Local fixture vulnerability for repeatable dependency-audit tests."
+  },
+  {
+    "id": "LOCAL-NPM-DEMO-0001",
+    "ecosystem": "npm",
+    "package": "legacy-js-lib",
+    "affected_versions": ["<2.0.0"],
+    "fixed_version": "2.0.0",
+    "severity": "medium",
+    "summary": "Local fixture vulnerability for repeatable npm dependency-audit tests."
+  }
+]
