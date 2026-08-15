@@ -196,6 +196,8 @@ class DependencyResponse(BaseModel):
     source_file: str
     risk_level: str = "unknown"
     risk_reason: str | None = None
+    source_url: str | None = None
+    license: str | None = None
 
 
 class DependencyAnalysisResponse(BaseModel):
@@ -206,6 +208,22 @@ class DependencyAnalysisResponse(BaseModel):
     warnings: list[str] = Field(default_factory=list)
     high_risk_count: int = 0
     review_count: int = 0
+
+
+class FileTreeEntryResponse(BaseModel):
+    name: str
+    path: str
+    kind: str
+    size_bytes: int | None = None
+    modified_at: datetime | None = None
+
+
+class FileTreeResponse(BaseModel):
+    project_id: int
+    path: str = ""
+    entries: list[FileTreeEntryResponse] = Field(default_factory=list)
+    truncated: bool = False
+    warnings: list[str] = Field(default_factory=list)
 
 
 class CommandCreate(BaseModel):

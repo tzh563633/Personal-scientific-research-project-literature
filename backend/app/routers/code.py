@@ -13,6 +13,7 @@ from ..models import CodeProject, User
 from ..schemas import (
     CodeProjectResponse,
     DependencyAnalysisResponse,
+    FileTreeResponse,
     GitCommitResponse,
     GitCommitDetailResponse,
     GitDiffResponse,
@@ -25,6 +26,7 @@ from ..services.code_analysis import (
     git_commits,
     git_diff,
     git_status,
+    list_project_tree,
 )
 
 router = APIRouter(prefix="/code", tags=["code"])
@@ -84,6 +86,23 @@ def get_git_status(project_id: int, db: Session = Depends(get_db), _: User = Dep
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
     return git_status(project)
+
+
+@router.get("/projects/{project_id}/tree", response_model=FileTreeResponse)
+def get_project_tree(
+    project_id: int,
+    path: str | None = Query(default=None, max_length=255),
+    limit: int = Query(default=200, ge=1, le=500),
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    project = db.get(CodeProject, project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    try:
+        return list_project_tree(project, path, limit)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 @router.get("/projects/{project_id}/git/commits", response_model=list[GitCommitResponse])

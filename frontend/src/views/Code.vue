@@ -131,6 +131,42 @@
             style="margin-top: 10px"
           />
         </el-tab-pane>
+
+        <el-tab-pane label="文件树" name="tree">
+          <div class="code-diff-toolbar">
+            <el-input v-model="treePath" clearable placeholder="可选：进入相对目录" />
+            <el-button @click="loadTree">
+              <el-icon><FolderOpened /></el-icon>
+              浏览目录
+            </el-button>
+          </div>
+          <el-table :data="inspection.tree.entries" max-height="420">
+            <el-table-column label="名称" min-width="220">
+              <template #default="{ row }">
+                <el-button v-if="row.kind === 'directory'" text @click="openTreeDirectory(row.path)">
+                  <el-icon><Folder /></el-icon>
+                  {{ row.name }}
+                </el-button>
+                <span v-else>
+                  <el-icon><Document /></el-icon>
+                  {{ row.name }}
+                </span>
+              </template>
+            </el-table-column>
+            <el-table-column prop="kind" label="类型" width="100" />
+            <el-table-column prop="size_bytes" label="大小" width="120" />
+            <el-table-column prop="path" label="路径" min-width="240" />
+          </el-table>
+          <el-tag v-if="inspection.tree.truncated" type="warning">目录结果已截断</el-tag>
+          <el-alert
+            v-for="warning in inspection.tree.warnings"
+            :key="warning"
+            :title="warning"
+            type="warning"
+            :closable="false"
+            style="margin-top: 10px"
+          />
+        </el-tab-pane>
       </el-tabs>
     </el-drawer>
   </section>
@@ -139,7 +175,7 @@
 <script setup>
 import { onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
-import { Search, Upload, View } from '@element-plus/icons-vue'
+import { Document, Folder, FolderOpened, Search, Upload, View } from '@element-plus/icons-vue'
 import api from '../api'
 
 const projects = ref([])
@@ -148,12 +184,14 @@ const loading = ref(false)
 const activeProject = ref(null)
 const activeTab = ref('status')
 const diffPath = ref('')
+const treePath = ref('')
 const inspection = reactive({
   status: null,
   commits: [],
   dependencies: { dependencies: [], high_risk_count: 0, review_count: 0, scanned_files: 0, warnings: [] },
   diff: null,
   commitDetail: null,
+  tree: { entries: [], truncated: false, warnings: [] },
 })
 
 async function refresh() {
@@ -177,20 +215,24 @@ async function inspect(project) {
   drawer.value = true
   activeTab.value = 'status'
   diffPath.value = ''
+  treePath.value = ''
   loading.value = true
   inspection.status = null
   inspection.commits = []
   inspection.diff = null
   inspection.commitDetail = null
+  inspection.tree = { entries: [], truncated: false, warnings: [] }
   try {
-    const [status, commits, dependencies] = await Promise.all([
+    const [status, commits, dependencies, tree] = await Promise.all([
       api.get(`/code/projects/${project.id}/git/status`),
       api.get(`/code/projects/${project.id}/git/commits`),
       api.get(`/code/projects/${project.id}/dependencies`),
+      api.get(`/code/projects/${project.id}/tree`),
     ])
     inspection.status = status.data
     inspection.commits = commits.data
     inspection.dependencies = dependencies.data
+    inspection.tree = tree.data
   } catch (error) {
     ElMessage.error(error.response?.data?.detail || '项目检查失败')
   } finally {
@@ -222,6 +264,24 @@ async function loadCommit(commit) {
   } catch (error) {
     ElMessage.error(error.response?.data?.detail || '提交详情获取失败')
   }
+}
+
+async function loadTree() {
+  if (!activeProject.value) return
+  try {
+    inspection.tree = (
+      await api.get(`/code/projects/${activeProject.value.id}/tree`, {
+        params: treePath.value ? { path: treePath.value } : {},
+      })
+    ).data
+  } catch (error) {
+    ElMessage.error(error.response?.data?.detail || '目录获取失败')
+  }
+}
+
+async function openTreeDirectory(path) {
+  treePath.value = path
+  await loadTree()
 }
 
 function riskType(level) {

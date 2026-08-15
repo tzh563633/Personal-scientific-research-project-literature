@@ -20,7 +20,11 @@ def test_dependency_analysis_reads_manifests_without_execution(tmp_path: Path, m
             {
                 "packages": {
                     "": {},
-                    "node_modules/vue": {"version": "3.5.0"},
+                    "node_modules/vue": {
+                        "version": "3.5.0",
+                        "resolved": "https://registry.npmjs.org/vue/-/vue-3.5.0.tgz",
+                        "license": "MIT",
+                    },
                 }
             }
         ),
@@ -49,7 +53,9 @@ def test_dependency_analysis_reads_manifests_without_execution(tmp_path: Path, m
     }
     names = {item.name for item in result.dependencies}
     assert {"fastapi", "vue", "vite", "sqlalchemy", "python", "numpy"} <= names
-    assert any(item.manager == "npm-lock" and item.name == "vue" for item in result.dependencies)
+    locked_vue = next(item for item in result.dependencies if item.manager == "npm-lock" and item.name == "vue")
+    assert locked_vue.source_url == "https://registry.npmjs.org/vue/-/vue-3.5.0.tgz"
+    assert locked_vue.license == "MIT"
     assert result.high_risk_count >= 1
     assert result.review_count >= 1
     assert result.warnings == []
@@ -137,3 +143,25 @@ def test_git_commit_detail_requires_a_hash(tmp_path: Path, monkeypatch):
         assert "commit hash" in str(exc)
     else:
         raise AssertionError("invalid commit hash was accepted")
+
+
+def test_file_tree_is_bounded_and_skips_heavy_directories(tmp_path: Path, monkeypatch):
+    monkeypatch.setattr(settings, "storage_root", str(tmp_path))
+    project_root = tmp_path / "code" / "project-6"
+    (project_root / "src").mkdir(parents=True)
+    (project_root / "node_modules").mkdir()
+    (project_root / "src" / "app.py").write_text("print('ok')", encoding="utf-8")
+    (project_root / "README.md").write_text("docs", encoding="utf-8")
+    project = models.CodeProject(id=6, name="tree", local_path="code/project-6")
+
+    root_tree = code_analysis.list_project_tree(project)
+    src_tree = code_analysis.list_project_tree(project, "src")
+
+    assert [entry.name for entry in root_tree.entries] == ["src", "README.md"]
+    assert src_tree.entries[0].path == "src/app.py"
+    try:
+        code_analysis.list_project_tree(project, "../outside")
+    except ValueError as exc:
+        assert "inside the project" in str(exc)
+    else:
+        raise AssertionError("tree path traversal was accepted")

@@ -13,6 +13,8 @@ from ..models import CodeProject
 from ..schemas import (
     DependencyAnalysisResponse,
     DependencyResponse,
+    FileTreeEntryResponse,
+    FileTreeResponse,
     GitCommitResponse,
     GitCommitDetailResponse,
     GitDiffResponse,
@@ -34,6 +36,7 @@ _SKIPPED_DIRECTORIES = {
 _MAX_SCAN_FILES = 10_000
 _MAX_DEPENDENCIES = 5_000
 _MAX_DIFF_BYTES = 200_000
+_MAX_TREE_ENTRIES = 500
 _REQUIREMENTS_FILES = re.compile(r"^requirements(?:[-_.].*)?\.txt$", re.IGNORECASE)
 
 
@@ -42,6 +45,54 @@ def project_directory(project: CodeProject) -> Path:
     if not path.is_dir():
         raise ValueError("Project directory is missing")
     return path
+
+
+def list_project_tree(
+    project: CodeProject,
+    relative_path: str | None = None,
+    limit: int = _MAX_TREE_ENTRIES,
+) -> FileTreeResponse:
+    root = project_directory(project)
+    normalized = ""
+    target = root
+    if relative_path:
+        normalized = _safe_relative_path(root, relative_path)
+        target = root / Path(*normalized.split("/"))
+    if not target.exists() or not target.is_dir():
+        raise ValueError("Project tree path is not a directory")
+    entries: list[FileTreeEntryResponse] = []
+    warnings: list[str] = []
+    truncated = False
+    for child in sorted(target.iterdir(), key=lambda item: (item.is_file(), item.name.lower())):
+        if len(entries) >= limit:
+            truncated = True
+            break
+        if child.name in _SKIPPED_DIRECTORIES:
+            continue
+        if child.is_symlink():
+            warnings.append(f"Skipped symlink: {child.name}")
+            continue
+        try:
+            stat = child.stat()
+        except OSError as exc:
+            warnings.append(f"{child.name}: {exc}")
+            continue
+        entries.append(
+            FileTreeEntryResponse(
+                name=child.name,
+                path=child.relative_to(root).as_posix(),
+                kind="directory" if child.is_dir() else "file",
+                size_bytes=None if child.is_dir() else stat.st_size,
+                modified_at=datetime.fromtimestamp(stat.st_mtime),
+            )
+        )
+    return FileTreeResponse(
+        project_id=project.id,
+        path=normalized,
+        entries=entries,
+        truncated=truncated,
+        warnings=warnings,
+    )
 
 
 def git_status(project: CodeProject) -> GitStatusResponse:
@@ -374,7 +425,16 @@ def _parse_package_lock(path: Path, source_file: str) -> list[DependencyResponse
                 continue
             version = metadata.get("version")
             if version:
-                result.append(_make_dependency("npm-lock", package_path.removeprefix("node_modules/"), f"=={version}", source_file))
+                result.append(
+                    _make_dependency(
+                        "npm-lock",
+                        package_path.removeprefix("node_modules/"),
+                        f"=={version}",
+                        source_file,
+                        source_url=_stringify_optional(metadata.get("resolved")),
+                        license_text=_stringify_optional(metadata.get("license")),
+                    )
+                )
     if not result and isinstance(document.get("dependencies"), dict):
         result.extend(_parse_npm_lock_dependencies(document["dependencies"], source_file))
     return result
@@ -387,7 +447,16 @@ def _parse_npm_lock_dependencies(values: dict[str, Any], source_file: str) -> li
             continue
         version = metadata.get("version")
         if version:
-            result.append(_make_dependency("npm-lock", str(name), f"=={version}", source_file))
+            result.append(
+                _make_dependency(
+                    "npm-lock",
+                    str(name),
+                    f"=={version}",
+                    source_file,
+                    source_url=_stringify_optional(metadata.get("resolved")),
+                    license_text=_stringify_optional(metadata.get("license")),
+                )
+            )
         nested = metadata.get("dependencies")
         if isinstance(nested, dict):
             result.extend(_parse_npm_lock_dependencies(nested, source_file))
@@ -403,7 +472,10 @@ def _parse_pipfile_lock(path: Path, source_file: str) -> list[DependencyResponse
             continue
         for name, metadata in values.items():
             specifier = metadata.get("version") if isinstance(metadata, dict) else None
-            result.append(_make_dependency("pipenv-lock", str(name), specifier, source_file))
+            source_url = None
+            if isinstance(metadata, dict):
+                source_url = _stringify_optional(metadata.get("index"))
+            result.append(_make_dependency("pipenv-lock", str(name), specifier, source_file, source_url=source_url))
     return result
 
 
@@ -415,7 +487,18 @@ def _parse_poetry_lock(path: Path, source_file: str) -> list[DependencyResponse]
         if not isinstance(package, dict) or not package.get("name"):
             continue
         version = package.get("version")
-        result.append(_make_dependency("poetry-lock", str(package["name"]), f"=={version}" if version else None, source_file))
+        source = package.get("source")
+        source_url = source.get("url") if isinstance(source, dict) else None
+        result.append(
+            _make_dependency(
+                "poetry-lock",
+                str(package["name"]),
+                f"=={version}" if version else None,
+                source_file,
+                source_url=_stringify_optional(source_url),
+                license_text=_stringify_optional(package.get("license")),
+            )
+        )
     return result
 
 
@@ -463,8 +546,10 @@ def _make_dependency(
     name: str,
     specifier: str | None,
     source_file: str,
+    source_url: str | None = None,
+    license_text: str | None = None,
 ) -> DependencyResponse:
-    risk_level, risk_reason = _dependency_risk(specifier)
+    risk_level, risk_reason = _dependency_risk(manager, specifier, source_url)
     return DependencyResponse(
         manager=manager,
         name=name,
@@ -472,18 +557,32 @@ def _make_dependency(
         source_file=source_file,
         risk_level=risk_level,
         risk_reason=risk_reason,
+        source_url=source_url,
+        license=license_text,
     )
 
 
-def _dependency_risk(specifier: str | None) -> tuple[str, str | None]:
+def _dependency_risk(
+    manager: str,
+    specifier: str | None,
+    source_url: str | None = None,
+) -> tuple[str, str | None]:
     value = (specifier or "").strip().lower()
+    source = (source_url or "").strip().lower()
     if not value or value in {"*", "latest"}:
         return "high", "No pinned version"
-    if any(marker in value for marker in ("git+", "http://", "https://", "file:", "path:")):
+    source_markers = ("git+", "file:", "path:")
+    if not manager.endswith("-lock"):
+        source_markers = ("git+", "http://", "https://", "file:", "path:")
+    if any(marker in f"{value} {source}" for marker in source_markers):
         return "high", "Dependency comes from a remote or local path"
     if value.startswith(("^", "~")) or any(marker in value for marker in (">", "<", "*")):
         return "review", "Version range may change during installation"
     return "low", None
+
+
+def _stringify_optional(value: Any) -> str | None:
+    return str(value) if value not in (None, "") else None
 
 
 def _stringify_specifier(value: Any) -> str | None:
