@@ -1,7 +1,7 @@
 <template>
   <section>
     <div class="toolbar">
-      <div><h2>期刊监控</h2><p>配置 RSS、关键词并手动运行监控。</p></div>
+      <div><h2>期刊追踪</h2><p>追踪关注期刊和关键词的最新论文更新。</p></div>
       <div class="toolbar-actions">
         <el-button @click="dialog = true">添加期刊</el-button>
         <el-button type="primary" @click="run">立即监控</el-button>

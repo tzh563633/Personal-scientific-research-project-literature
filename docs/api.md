@@ -39,6 +39,7 @@ API 前缀为 `/api/v1`，Swagger 文档位于 `/docs`。
 - `GET /reviews/outputs/{id}/sources`
 - `/system`
 - `/agent`
+- `GET /dashboard/overview`
 - `GET /jobs/{id}` and `POST /jobs/{id}/cancel` use the common job status
   values `pending`, `running`, `succeeded`, `failed`, and `cancelled`.
 

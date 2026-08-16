@@ -15,6 +15,17 @@ From the project root:
 .\scripts\deploy-local.ps1
 ```
 
+For the one-click desktop workflow, create a Windows shortcut once:
+
+```powershell
+.\scripts\create-desktop-shortcut.ps1
+```
+
+After that, double-click `科研控制平台.lnk` on the Desktop. The launcher
+reuses the local deployment script, waits for health checks, writes failures
+to `storage/logs/platform-launcher.log`, and opens the platform in the
+default browser.
+
 The script creates `.env` with random local secrets when it does not exist,
 rejects placeholder secrets, builds the images, waits for PostgreSQL
 migrations and backend/frontend health, and prints the local and LAN URLs.

@@ -49,3 +49,8 @@ def test_agent_contracts_are_modelled():
                         "application/json" in response.get("content", {})
                         for response in operation.get("responses", {}).values()
                     )
+
+
+def test_dashboard_overview_contract_is_registered():
+    operation = app.openapi()["paths"]["/api/v1/dashboard/overview"]["get"]
+    assert operation["responses"]["200"]["content"]["application/json"]["schema"]

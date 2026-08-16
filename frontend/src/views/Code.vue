@@ -2,8 +2,8 @@
   <section>
     <div class="toolbar">
       <div>
-        <h2>代码保管</h2>
-        <p>保存项目并查看 Git 状态与依赖清单，平台不会执行上传代码。</p>
+        <h2>研究资产</h2>
+        <p>管理代码分支、安全审计、研究方法和研究工具，平台不会执行上传代码。</p>
       </div>
       <el-upload :http-request="upload" :show-file-list="false">
         <el-button type="primary">

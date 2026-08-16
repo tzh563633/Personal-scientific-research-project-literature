@@ -26,6 +26,15 @@ The P2 final report is recorded in
 P3 plan and acceptance criteria are tracked in
 [docs/p3-plan-and-acceptance.md](docs/p3-plan-and-acceptance.md).
 
+The P3 final report is recorded in
+[docs/p3-final-report.md](docs/p3-final-report.md).
+
+P4 product requirements and architecture are recorded in
+[docs/p4-product-requirements.md](docs/p4-product-requirements.md).
+
+The P4 final acceptance report is recorded in
+[docs/p4-final-report.md](docs/p4-final-report.md).
+
 The host Agent is optional for business workflows that need a Windows process:
 
 ```powershell

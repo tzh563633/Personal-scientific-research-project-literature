@@ -1,7 +1,7 @@
 <template>
   <section>
     <div class="toolbar">
-      <div><h2>文献管理</h2><p>上传 PDF 或 DOCX，查看解析和结构化结果。</p></div>
+      <div><h2>文献分析</h2><p>导入文献材料，查看解析状态并沉淀结构化结果。</p></div>
       <div class="toolbar-actions">
         <el-button @click="downloadExcel">下载 Excel</el-button>
         <el-button type="primary" @click="refresh">刷新</el-button>
@@ -72,4 +72,3 @@ onMounted(refresh)
   font-family: ui-monospace, monospace;
 }
 </style>
-

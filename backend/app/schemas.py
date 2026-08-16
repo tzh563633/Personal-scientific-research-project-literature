@@ -403,6 +403,24 @@ class ConfigUpdate(BaseModel):
     values: dict[str, str | int | bool | None]
 
 
+class DashboardOverviewResponse(BaseModel):
+    generated_at: datetime
+    paper_count: int = 0
+    processed_paper_count: int = 0
+    pending_paper_count: int = 0
+    journal_count: int = 0
+    enabled_journal_count: int = 0
+    alert_count: int = 0
+    review_output_count: int = 0
+    code_project_count: int = 0
+    online_agent_count: int = 0
+    active_job_count: int = 0
+    latest_excel_update: ExcelUpdateResponse | None = None
+    recent_papers: list[PaperResponse] = Field(default_factory=list)
+    recent_alerts: list[AlertResponse] = Field(default_factory=list)
+    recent_reviews: list[ReviewOutputResponse] = Field(default_factory=list)
+
+
 class AcademicSourceCreate(BaseModel):
     source_name: str = Field(min_length=1, max_length=100)
     config: dict[str, Any] = Field(default_factory=dict)

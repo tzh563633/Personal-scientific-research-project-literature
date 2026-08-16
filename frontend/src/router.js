@@ -20,11 +20,15 @@ const router = createRouter({
       component: Layout,
       children: [
         { path: '', component: Dashboard },
-        { path: 'papers', component: Papers },
-        { path: 'journals', component: Journals },
-        { path: 'code', component: Code },
+        { path: 'journal-tracking', component: Journals },
+        { path: 'folder-analysis', component: Papers },
+        { path: 'review-writing', component: Reviews },
+        { path: 'research-assets', component: Code },
+        { path: 'papers', redirect: '/folder-analysis' },
+        { path: 'journals', redirect: '/journal-tracking' },
+        { path: 'code', redirect: '/research-assets' },
         { path: 'commands', component: Commands },
-        { path: 'reviews', component: Reviews },
+        { path: 'reviews', redirect: '/review-writing' },
         { path: 'system', component: System },
       ],
     },
@@ -38,4 +42,3 @@ router.beforeEach(async (to) => {
 })
 
 export default router
-
