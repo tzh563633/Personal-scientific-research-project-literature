@@ -12,6 +12,7 @@ from backend.app import models
 from backend.app.config import settings
 from backend.app.services import backup as backup_service
 from backend.app.services import excel as excel_service
+from backend.app.services import reviews as reviews_service
 from backend.app.services.llm import MockLLMProvider
 from backend.app.services import papers as papers_service
 from backend.app.services.crypto import decrypt_secret, encrypt_secret
@@ -207,3 +208,92 @@ def test_folder_path_validation_requires_absolute_paths():
             pass
         else:
             raise AssertionError(f"unsafe folder path accepted: {value}")
+
+
+def test_review_generation_uses_selected_excel_and_records_traceability(tmp_path: Path, monkeypatch):
+    engine = create_engine(f"sqlite:///{tmp_path / 'review.db'}", connect_args={"check_same_thread": False})
+    models.Base.metadata.create_all(engine)
+    storage_root = tmp_path / "storage"
+    monkeypatch.setattr(settings, "storage_root", str(storage_root))
+    workbook_path = storage_root / "exports" / "selected.xlsx"
+    workbook_path.parent.mkdir(parents=True)
+    from openpyxl import Workbook
+
+    sheet_book = Workbook()
+    sheet = sheet_book.active
+    sheet.title = "Papers"
+    sheet.append(["paper_id", "标题"])
+    sheet.append([1, "Excel-guided resilience paper"])
+    sheet_book.save(workbook_path)
+
+    class Provider:
+        def generate_review(self, framework, sources):
+            assert sources[0]["source"] == "excel"
+            return "# Excel Review"
+
+    monkeypatch.setattr(reviews_service, "search_academic_sources", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr(reviews_service, "get_provider", lambda *_args, **_kwargs: Provider())
+
+    with Session(engine) as db:
+        paper = models.Paper(
+            id=1,
+            title="Excel-guided resilience paper",
+            status="processed",
+            citation_gbt="Author. Excel-guided resilience paper.",
+        )
+        framework = models.ReviewFramework(
+            name="Excel review",
+            content="resilience review outline",
+            excel_path="exports/selected.xlsx",
+        )
+        db.add_all([paper, framework])
+        db.commit()
+        db.refresh(framework)
+
+        output = reviews_service.generate_review(db, framework)
+
+        assert output.content == "# Excel Review"
+        assert output.source_count == 1
+        assert output.verified_source_count == 1
+        assert output.full_text_source_count == 1
+        assert output.fact_check_summary["passed"] == 1
+        source = db.query(models.ReviewSource).one()
+        assert source.source_type == "excel"
+        assert source.verified is True
+        assert (storage_root / output.missing_pdf_md_path).is_file()
+
+
+def test_transient_deepseek_key_is_used_without_persisting_it(tmp_path: Path, monkeypatch):
+    engine = create_engine(f"sqlite:///{tmp_path / 'transient-review.db'}", connect_args={"check_same_thread": False})
+    models.Base.metadata.create_all(engine)
+    monkeypatch.setattr(settings, "storage_root", str(tmp_path / "storage"))
+    captured = {}
+
+    class Provider:
+        def generate_review(self, _framework, _sources):
+            return "# Transient Key Review"
+
+    def provider_factory(provider_name=None, api_key=None):
+        captured["provider_name"] = provider_name
+        captured["api_key"] = api_key
+        return Provider()
+
+    monkeypatch.setattr(reviews_service, "search_academic_sources", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr(reviews_service, "get_provider", provider_factory)
+
+    with Session(engine) as db:
+        db.add(models.Paper(title="Digital resilience", status="processed"))
+        framework = models.ReviewFramework(name="Transient", content="digital resilience")
+        db.add(framework)
+        db.commit()
+        db.refresh(framework)
+
+        output = reviews_service.generate_review(
+            db,
+            framework,
+            transient_deepseek_api_key="temporary-deepseek-key",
+        )
+
+        assert output.content == "# Transient Key Review"
+        assert captured == {"provider_name": "deepseek", "api_key": "temporary-deepseek-key"}
+        assert db.query(models.SystemConfig).count() == 0

@@ -29,6 +29,95 @@
       </el-table-column>
     </el-table>
 
+    <el-tabs v-model="assetLibraryTab" class="asset-library">
+      <el-tab-pane label="研究方法" name="methods">
+        <div class="asset-toolbar">
+          <span class="muted">保存适用场景、步骤、优缺点和关联材料。</span>
+          <el-button type="primary" @click="openAssetDialog('method')">新增方法</el-button>
+        </div>
+        <el-table :data="methods" size="small">
+          <el-table-column prop="name" label="方法" min-width="180" />
+          <el-table-column prop="use_cases" label="适用场景" min-width="220" />
+          <el-table-column prop="steps" label="关键步骤" min-width="260" />
+          <el-table-column label="操作" width="120">
+            <template #default="{ row }">
+              <el-button link type="primary" @click="openAssetDialog('method', row)">编辑</el-button>
+              <el-button link type="danger" @click="removeAsset('method', row)">删除</el-button>
+            </template>
+          </el-table-column>
+        </el-table>
+      </el-tab-pane>
+
+      <el-tab-pane label="研究工具" name="tools">
+        <div class="asset-toolbar">
+          <span class="muted">保存工具用途、安装方式、使用说明和注意事项。</span>
+          <el-button type="primary" @click="openAssetDialog('tool')">新增工具</el-button>
+        </div>
+        <el-table :data="tools" size="small">
+          <el-table-column prop="name" label="工具" min-width="180" />
+          <el-table-column prop="purpose" label="用途" min-width="240" />
+          <el-table-column prop="installation" label="安装方式" min-width="220" />
+          <el-table-column label="操作" width="120">
+            <template #default="{ row }">
+              <el-button link type="primary" @click="openAssetDialog('tool', row)">编辑</el-button>
+              <el-button link type="danger" @click="removeAsset('tool', row)">删除</el-button>
+            </template>
+          </el-table-column>
+        </el-table>
+      </el-tab-pane>
+
+      <el-tab-pane label="分析流程" name="workflows">
+        <div class="asset-toolbar">
+          <span class="muted">保存可复用的研究流程模板。</span>
+          <el-button type="primary" @click="openAssetDialog('workflow')">新增流程</el-button>
+        </div>
+        <el-table :data="workflows" size="small">
+          <el-table-column prop="name" label="流程" min-width="180" />
+          <el-table-column prop="description" label="说明" min-width="260" />
+          <el-table-column label="步骤" min-width="280">
+            <template #default="{ row }">{{ row.steps?.join(' -> ') || '暂无步骤' }}</template>
+          </el-table-column>
+          <el-table-column label="操作" width="120">
+            <template #default="{ row }">
+              <el-button link type="primary" @click="openAssetDialog('workflow', row)">编辑</el-button>
+              <el-button link type="danger" @click="removeAsset('workflow', row)">删除</el-button>
+            </template>
+          </el-table-column>
+        </el-table>
+      </el-tab-pane>
+    </el-tabs>
+
+    <el-dialog v-model="assetDialog" :title="assetDialogTitle" width="620px">
+      <el-form :model="assetForm" label-width="94px">
+        <el-form-item label="名称">
+          <el-input v-model="assetForm.name" />
+        </el-form-item>
+        <template v-if="assetType === 'method'">
+          <el-form-item label="说明"><el-input v-model="assetForm.description" type="textarea" :rows="2" /></el-form-item>
+          <el-form-item label="适用场景"><el-input v-model="assetForm.use_cases" type="textarea" :rows="2" /></el-form-item>
+          <el-form-item label="关键步骤"><el-input v-model="assetForm.steps" type="textarea" :rows="3" /></el-form-item>
+          <el-form-item label="优势"><el-input v-model="assetForm.advantages" type="textarea" :rows="2" /></el-form-item>
+          <el-form-item label="局限"><el-input v-model="assetForm.limitations" type="textarea" :rows="2" /></el-form-item>
+        </template>
+        <template v-else-if="assetType === 'tool'">
+          <el-form-item label="用途"><el-input v-model="assetForm.purpose" type="textarea" :rows="2" /></el-form-item>
+          <el-form-item label="安装方式"><el-input v-model="assetForm.installation" type="textarea" :rows="2" /></el-form-item>
+          <el-form-item label="使用说明"><el-input v-model="assetForm.usage" type="textarea" :rows="3" /></el-form-item>
+          <el-form-item label="注意事项"><el-input v-model="assetForm.cautions" type="textarea" :rows="2" /></el-form-item>
+        </template>
+        <template v-else>
+          <el-form-item label="说明"><el-input v-model="assetForm.description" type="textarea" :rows="2" /></el-form-item>
+          <el-form-item label="流程步骤">
+            <el-input v-model="assetForm.steps" type="textarea" :rows="5" placeholder="每行一个步骤" />
+          </el-form-item>
+        </template>
+      </el-form>
+      <template #footer>
+        <el-button @click="assetDialog = false">取消</el-button>
+        <el-button type="primary" @click="saveAsset">保存</el-button>
+      </template>
+    </el-dialog>
+
     <el-drawer v-model="drawer" :title="activeProject?.name || '项目检查'" size="720px">
       <el-skeleton v-if="loading" :rows="8" animated />
       <el-empty v-else-if="!activeProject" description="请选择项目" />
@@ -79,6 +168,29 @@
           />
           <pre v-else class="code-diff">{{ inspection.diff?.patch || '暂无 diff' }}</pre>
           <el-tag v-if="inspection.diff?.truncated" type="warning">diff 已限制为 200 KB</el-tag>
+        </el-tab-pane>
+
+        <el-tab-pane label="Git 分支" name="branches">
+          <el-alert
+            v-if="inspection.branchError"
+            :title="inspection.branchError"
+            type="warning"
+            :closable="false"
+          />
+          <div class="code-diff-toolbar">
+            <el-input v-model="branchName" placeholder="新分支名称，例如 research/review-draft" />
+            <el-button type="primary" :disabled="!branchName" @click="createBranch">创建分支</el-button>
+          </div>
+          <el-table :data="inspection.branches" size="small">
+            <el-table-column prop="name" label="分支" min-width="260" />
+            <el-table-column prop="commit_hash" label="提交" min-width="160" />
+            <el-table-column label="当前" width="85">
+              <template #default="{ row }">
+                <el-tag :type="row.current ? 'success' : 'info'">{{ row.current ? '当前' : '可用' }}</el-tag>
+              </template>
+            </el-table-column>
+          </el-table>
+          <p class="muted">平台只创建 Git 引用，不检出分支或执行项目代码。</p>
         </el-tab-pane>
 
         <el-tab-pane label="提交记录" name="commits">
@@ -242,20 +354,42 @@
 </template>
 
 <script setup>
-import { onMounted, reactive, ref } from 'vue'
-import { ElMessage } from 'element-plus'
+import { computed, onMounted, reactive, ref } from 'vue'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { Document, Folder, FolderOpened, Memo, Search, Upload, View } from '@element-plus/icons-vue'
 import api from '../api'
 
 const projects = ref([])
+const methods = ref([])
+const tools = ref([])
+const workflows = ref([])
+const assetLibraryTab = ref('methods')
+const assetDialog = ref(false)
+const assetType = ref('method')
+const assetEditingId = ref(null)
+const assetForm = reactive({
+  name: '',
+  description: '',
+  use_cases: '',
+  steps: '',
+  advantages: '',
+  limitations: '',
+  purpose: '',
+  installation: '',
+  usage: '',
+  cautions: '',
+})
 const drawer = ref(false)
 const loading = ref(false)
 const activeProject = ref(null)
 const activeTab = ref('status')
 const diffPath = ref('')
 const treePath = ref('')
+const branchName = ref('')
 const inspection = reactive({
   status: null,
+  branches: [],
+  branchError: null,
   commits: [],
   dependencies: { dependencies: [], high_risk_count: 0, review_count: 0, scanned_files: 0, warnings: [] },
   securityAudit: {
@@ -273,9 +407,22 @@ const inspection = reactive({
   preview: null,
   report: null,
 })
+const assetDialogTitle = computed(() => {
+  const labels = { method: '研究方法', tool: '研究工具', workflow: '分析流程' }
+  return `${assetEditingId.value ? '编辑' : '新增'}${labels[assetType.value]}`
+})
 
 async function refresh() {
-  projects.value = (await api.get('/code/projects')).data
+  const [projectResponse, methodResponse, toolResponse, workflowResponse] = await Promise.all([
+    api.get('/code/projects'),
+    api.get('/research-assets/methods'),
+    api.get('/research-assets/tools'),
+    api.get('/research-assets/workflows'),
+  ])
+  projects.value = projectResponse.data
+  methods.value = methodResponse.data
+  tools.value = toolResponse.data
+  workflows.value = workflowResponse.data
 }
 
 async function upload({ file }) {
@@ -298,6 +445,8 @@ async function inspect(project) {
   treePath.value = ''
   loading.value = true
   inspection.status = null
+  inspection.branches = []
+  inspection.branchError = null
   inspection.commits = []
   inspection.diff = null
   inspection.commitDetail = null
@@ -314,14 +463,16 @@ async function inspect(project) {
   inspection.preview = null
   inspection.report = null
   try {
-    const [status, commits, dependencies, securityAudit, tree] = await Promise.all([
+    const [status, branches, commits, dependencies, securityAudit, tree] = await Promise.all([
       api.get(`/code/projects/${project.id}/git/status`),
+      api.get(`/code/projects/${project.id}/git/branches`),
       api.get(`/code/projects/${project.id}/git/commits`),
       api.get(`/code/projects/${project.id}/dependencies`),
       api.get(`/code/projects/${project.id}/security-audit`),
       api.get(`/code/projects/${project.id}/tree`),
     ])
     inspection.status = status.data
+    inspection.branches = branches.data
     inspection.commits = commits.data
     inspection.dependencies = dependencies.data
     inspection.securityAudit = securityAudit.data
@@ -330,6 +481,108 @@ async function inspect(project) {
     ElMessage.error(error.response?.data?.detail || '项目检查失败')
   } finally {
     loading.value = false
+  }
+}
+
+async function createBranch() {
+  if (!activeProject.value || !branchName.value.trim()) return
+  try {
+    const { data } = await api.post(`/code/projects/${activeProject.value.id}/git/branches`, {
+      name: branchName.value.trim(),
+    })
+    inspection.branches = [...inspection.branches, data].sort((left, right) => left.name.localeCompare(right.name))
+    branchName.value = ''
+    ElMessage.success('分支已创建')
+  } catch (error) {
+    inspection.branchError = error.response?.data?.detail || '分支创建失败'
+  }
+}
+
+function assetPath(type) {
+  return { method: 'methods', tool: 'tools', workflow: 'workflows' }[type]
+}
+
+function resetAssetForm() {
+  Object.assign(assetForm, {
+    name: '',
+    description: '',
+    use_cases: '',
+    steps: '',
+    advantages: '',
+    limitations: '',
+    purpose: '',
+    installation: '',
+    usage: '',
+    cautions: '',
+  })
+}
+
+function openAssetDialog(type, item = null) {
+  assetType.value = type
+  assetEditingId.value = item?.id || null
+  resetAssetForm()
+  if (item) {
+    Object.assign(assetForm, item)
+    if (type === 'workflow') assetForm.steps = (item.steps || []).join('\n')
+  }
+  assetDialog.value = true
+}
+
+function assetPayload() {
+  if (assetType.value === 'workflow') {
+    return {
+      name: assetForm.name,
+      description: assetForm.description || null,
+      steps: assetForm.steps.split('\n').map((item) => item.trim()).filter(Boolean),
+    }
+  }
+  if (assetType.value === 'tool') {
+    return {
+      name: assetForm.name,
+      purpose: assetForm.purpose || null,
+      installation: assetForm.installation || null,
+      usage: assetForm.usage || null,
+      cautions: assetForm.cautions || null,
+    }
+  }
+  return {
+    name: assetForm.name,
+    description: assetForm.description || null,
+    use_cases: assetForm.use_cases || null,
+    steps: assetForm.steps || null,
+    advantages: assetForm.advantages || null,
+    limitations: assetForm.limitations || null,
+  }
+}
+
+async function saveAsset() {
+  if (!assetForm.name.trim()) {
+    ElMessage.warning('请填写名称')
+    return
+  }
+  const path = `/research-assets/${assetPath(assetType.value)}`
+  try {
+    if (assetEditingId.value) {
+      await api.put(`${path}/${assetEditingId.value}`, assetPayload())
+    } else {
+      await api.post(path, assetPayload())
+    }
+    assetDialog.value = false
+    await refresh()
+    ElMessage.success('研究资产已保存')
+  } catch (error) {
+    ElMessage.error(error.response?.data?.detail || '保存失败')
+  }
+}
+
+async function removeAsset(type, item) {
+  try {
+    await ElMessageBox.confirm(`删除“${item.name}”不会影响已上传代码或文献。`, '确认删除')
+    await api.delete(`/research-assets/${assetPath(type)}/${item.id}`)
+    await refresh()
+    ElMessage.success('研究资产已删除')
+  } catch (error) {
+    if (error !== 'cancel') ElMessage.error(error.response?.data?.detail || '删除失败')
   }
 }
 
@@ -423,6 +676,18 @@ onMounted(refresh)
   flex-wrap: wrap;
   gap: 8px;
   margin: 18px 0;
+}
+
+.asset-library {
+  margin-top: 22px;
+}
+
+.asset-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
 }
 
 .code-diff-toolbar {

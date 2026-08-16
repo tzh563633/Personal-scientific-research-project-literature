@@ -29,6 +29,7 @@ API 前缀为 `/api/v1`，Swagger 文档位于 `/docs`。
 ## 业务模块
 
 - `/excel`
+- `GET /excel/files`
 - `/journals`
 - `GET /journals/items`
 - `GET /journals/alerts`
@@ -39,16 +40,25 @@ API 前缀为 `/api/v1`，Swagger 文档位于 `/docs`。
 - `GET /code/projects/{id}/dependencies`
 - `GET /code/projects/{id}/security-audit`
 - `GET /code/projects/{id}/git/status`
+- `GET /code/projects/{id}/git/branches`
+- `POST /code/projects/{id}/git/branches`
 - `GET /code/projects/{id}/git/commits`
 - `GET /code/projects/{id}/git/commits/{hash}`
 - `GET /code/projects/{id}/git/diff?path=...`
 - `/commands`
 - `/reviews`
+- `POST /reviews/frameworks` accepts an optional `excel_path` under the
+  platform `storage/exports` directory.
+- `POST /reviews/generate` accepts an optional `excel_path` and transient
+  `deepseek_api_key`; the transient key is never stored in a job payload.
 - `GET /reviews/outputs/{id}/sources`
 - `/system`
 - `/agent`
 - `POST /agent/folders/{id}/documents` (multipart PDF upload from the host Agent)
 - `GET /dashboard/overview`
+- `/research-assets/methods`
+- `/research-assets/tools`
+- `/research-assets/workflows`
 - `GET /jobs/{id}` and `POST /jobs/{id}/cancel` use the common job status
   values `pending`, `running`, `succeeded`, `failed`, and `cancelled`.
 

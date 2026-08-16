@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
+from pathlib import PurePosixPath
 
+from openpyxl import load_workbook
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from ..config import settings
-from ..models import Job, Paper, PaperFile, ReviewFramework, ReviewOutput, ReviewSource
+from ..models import Job, Paper, PaperFile, ReviewFramework, ReviewOutput, ReviewSource, SystemConfig
 from .academic import (
     _normalize_doi,
     download_source_pdf,
@@ -18,6 +20,7 @@ from .academic import (
 from .files import absolute_storage_path, file_metadata, relative_storage_path, sha256_path
 from .llm import get_provider
 from .papers import process_paper
+from .crypto import decrypt_secret
 
 
 def _keywords(content: str) -> list[str]:
@@ -53,6 +56,74 @@ def _local_papers(db: Session, keywords: list[str]) -> list[Paper]:
                 found[paper.id] = paper
                 break
     return list(found.values())[:100]
+
+
+def _resolve_excel_export(excel_path: str) -> Path:
+    normalized = (excel_path or "").strip().replace("\\", "/")
+    relative = PurePosixPath(normalized)
+    if (
+        not normalized
+        or relative.is_absolute()
+        or any(part in {"", ".", ".."} for part in relative.parts)
+        or not normalized.startswith("exports/")
+        or relative.suffix.lower() not in {".xlsx", ".xlsm"}
+    ):
+        raise ValueError("Review Excel path must be a relative exports/*.xlsx or exports/*.xlsm path")
+    export_root = (settings.storage_path / "exports").resolve()
+    resolved = (settings.storage_path / relative).resolve()
+    if export_root not in resolved.parents or not resolved.is_file():
+        raise ValueError("Selected review Excel file does not exist in platform exports")
+    return resolved
+
+
+def _papers_from_excel(db: Session, excel_path: str | None) -> list[Paper]:
+    if not excel_path:
+        return []
+    workbook_path = _resolve_excel_export(excel_path)
+    try:
+        workbook = load_workbook(workbook_path, read_only=True, data_only=True)
+        sheet = workbook["Papers"] if "Papers" in workbook.sheetnames else workbook.active
+        headers = [str(value or "").strip().lower() for value in next(sheet.iter_rows(min_row=1, max_row=1, values_only=True))]
+        paper_column = headers.index("paper_id") if "paper_id" in headers else 0
+        papers: list[Paper] = []
+        seen: set[int] = set()
+        for row in sheet.iter_rows(min_row=2, values_only=True):
+            raw_id = row[paper_column] if paper_column < len(row) else None
+            try:
+                paper_id = int(raw_id)
+            except (TypeError, ValueError):
+                continue
+            if paper_id in seen:
+                continue
+            paper = db.get(Paper, paper_id)
+            if paper:
+                seen.add(paper_id)
+                papers.append(paper)
+        return papers
+    finally:
+        try:
+            workbook.close()
+        except (UnboundLocalError, AttributeError):
+            pass
+
+
+def _saved_deepseek_key(db: Session) -> str | None:
+    item = db.query(SystemConfig).filter(SystemConfig.key == "DEEPSEEK_API_KEY").first()
+    if not item or not item.value:
+        return None
+    try:
+        return decrypt_secret(item.value)
+    except Exception:
+        return None
+
+
+def _review_provider(db: Session, transient_deepseek_api_key: str | None):
+    if transient_deepseek_api_key:
+        return get_provider("deepseek", transient_deepseek_api_key)
+    saved_key = _saved_deepseek_key(db)
+    if saved_key:
+        return get_provider("deepseek", saved_key)
+    return get_provider()
 
 
 def _ingest_external_pdf(db: Session, source: dict, path: Path) -> Paper | None:
@@ -94,9 +165,17 @@ def _ingest_external_pdf(db: Session, source: dict, path: Path) -> Paper | None:
     return None
 
 
-def generate_review(db: Session, framework: ReviewFramework) -> ReviewOutput:
+def generate_review(
+    db: Session,
+    framework: ReviewFramework,
+    transient_deepseek_api_key: str | None = None,
+) -> ReviewOutput:
     keywords = _keywords(framework.content)
-    local = _local_papers(db, keywords)
+    excel_papers = _papers_from_excel(db, framework.excel_path)
+    local_by_id = {paper.id: paper for paper in excel_papers}
+    for paper in _local_papers(db, keywords):
+        local_by_id.setdefault(paper.id, paper)
+    local = list(local_by_id.values())[:100]
     sources: list[dict] = [
         {
             "title": paper.title,
@@ -104,9 +183,9 @@ def generate_review(db: Session, framework: ReviewFramework) -> ReviewOutput:
             "year": paper.year,
             "doi": paper.doi,
             "citation": paper.citation_gbt,
-            "source": "local",
+            "source": "excel" if paper.id in {item.id for item in excel_papers} else "local",
             "verified": True,
-            "verified_by": "local_paper",
+            "verified_by": "platform_excel" if paper.id in {item.id for item in excel_papers} else "local_paper",
             "full_text_available": True,
         }
         for paper in local
@@ -146,7 +225,18 @@ def generate_review(db: Session, framework: ReviewFramework) -> ReviewOutput:
             )
 
     verified_sources = [source for source in sources if source.get("verified")]
-    content = get_provider().generate_review(framework.content, verified_sources)
+    for source in verified_sources:
+        source["fact_checked"] = fact_check(source, local)
+    try:
+        content = _review_provider(db, transient_deepseek_api_key).generate_review(
+            framework.content,
+            verified_sources,
+        )
+        model_fallback = False
+    except Exception:
+        content = get_provider("mock").generate_review(framework.content, verified_sources)
+        content += "\n\n> 真实模型调用失败，已降级为 Mock Provider。"
+        model_fallback = True
     missing_path = settings.storage_path / "reviews" / f"missing-{framework.id}.md"
     missing_lines = [
         f"- {item.get('title') or '未命名文献'}"
@@ -163,6 +253,15 @@ def generate_review(db: Session, framework: ReviewFramework) -> ReviewOutput:
         framework_id=framework.id,
         content=content,
         missing_pdf_md_path=str(missing_path.relative_to(settings.storage_path)),
+        source_count=len(sources),
+        verified_source_count=len(verified_sources),
+        full_text_source_count=sum(bool(source.get("full_text_available")) for source in verified_sources),
+        fact_check_summary={
+            "checked": len(verified_sources),
+            "passed": sum(bool(source.get("fact_checked")) for source in verified_sources),
+            "failed": sum(not bool(source.get("fact_checked")) for source in verified_sources),
+            "model_fallback": model_fallback,
+        },
     )
     db.add(output)
     db.flush()

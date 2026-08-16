@@ -41,6 +41,18 @@ P5 plan and acceptance criteria are tracked in
 The P5 final acceptance report is recorded in
 [docs/p5-final-report.md](docs/p5-final-report.md).
 
+P6 plan and acceptance criteria are tracked in
+[docs/p6-plan-and-acceptance.md](docs/p6-plan-and-acceptance.md).
+
+P6 final acceptance is recorded in
+[docs/p6-final-report.md](docs/p6-final-report.md).
+
+P7 plan and acceptance criteria are tracked in
+[docs/p7-plan-and-acceptance.md](docs/p7-plan-and-acceptance.md).
+
+P7 final acceptance is recorded in
+[docs/p7-final-report.md](docs/p7-final-report.md).
+
 The host Agent is optional for business workflows that need a Windows process:
 
 ```powershell

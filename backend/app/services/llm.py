@@ -237,16 +237,19 @@ class OpenAICompatibleProvider(LLMProvider):
         return self._chat(prompt)
 
 
-def get_provider() -> LLMProvider:
+def get_provider(provider_name: str | None = None, api_key: str | None = None) -> LLMProvider:
     providers: dict[str, LLMProvider] = {
         "mock": MockLLMProvider(),
         "deepseek": OpenAICompatibleProvider(
-            "deepseek", settings.deepseek_base_url, settings.deepseek_api_key, settings.deepseek_model
+            "deepseek",
+            settings.deepseek_base_url,
+            api_key if provider_name == "deepseek" and api_key else settings.deepseek_api_key,
+            settings.deepseek_model,
         ),
         "qwen": OpenAICompatibleProvider("qwen", settings.qwen_base_url, settings.qwen_api_key, settings.qwen_model),
         "kimi": OpenAICompatibleProvider("kimi", settings.kimi_base_url, settings.kimi_api_key, settings.kimi_model),
     }
-    selected = settings.default_llm.lower()
+    selected = (provider_name or settings.default_llm).lower()
     provider = providers.get(selected, providers["mock"])
     if selected != "mock" and not getattr(provider, "api_key", ""):
         return providers["mock"]

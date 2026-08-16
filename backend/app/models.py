@@ -188,6 +188,44 @@ class CodeProject(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=now)
 
 
+class ResearchMethod(Base):
+    __tablename__ = "research_methods"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String(200))
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    use_cases: Mapped[str | None] = mapped_column(Text, nullable=True)
+    steps: Mapped[str | None] = mapped_column(Text, nullable=True)
+    advantages: Mapped[str | None] = mapped_column(Text, nullable=True)
+    limitations: Mapped[str | None] = mapped_column(Text, nullable=True)
+    related_project_id: Mapped[int | None] = mapped_column(ForeignKey("code_projects.id"), nullable=True)
+    related_paper_id: Mapped[int | None] = mapped_column(ForeignKey("papers.id"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=now, onupdate=now)
+
+
+class ResearchTool(Base):
+    __tablename__ = "research_tools"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String(200))
+    purpose: Mapped[str | None] = mapped_column(Text, nullable=True)
+    installation: Mapped[str | None] = mapped_column(Text, nullable=True)
+    usage: Mapped[str | None] = mapped_column(Text, nullable=True)
+    cautions: Mapped[str | None] = mapped_column(Text, nullable=True)
+    related_project_id: Mapped[int | None] = mapped_column(ForeignKey("code_projects.id"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=now, onupdate=now)
+
+
+class ResearchWorkflow(Base):
+    __tablename__ = "research_workflows"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String(200))
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    steps: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=now, onupdate=now)
+
+
 class Command(Base):
     __tablename__ = "commands"
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -262,6 +300,7 @@ class ReviewFramework(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     name: Mapped[str] = mapped_column(String(200))
     content: Mapped[str] = mapped_column(Text)
+    excel_path: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=now)
 
 
@@ -271,6 +310,10 @@ class ReviewOutput(Base):
     framework_id: Mapped[int | None] = mapped_column(ForeignKey("review_frameworks.id"), nullable=True)
     content: Mapped[str] = mapped_column(Text)
     missing_pdf_md_path: Mapped[str | None] = mapped_column(Text, nullable=True)
+    source_count: Mapped[int] = mapped_column(Integer, default=0)
+    verified_source_count: Mapped[int] = mapped_column(Integer, default=0)
+    full_text_source_count: Mapped[int] = mapped_column(Integer, default=0)
+    fact_check_summary: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=now)
 
 

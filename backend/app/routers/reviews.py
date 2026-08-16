@@ -44,11 +44,43 @@ def generate(
     framework = db.get(ReviewFramework, payload.framework_id)
     if not framework:
         raise HTTPException(status_code=404, detail="Framework not found")
+    if payload.excel_path is not None:
+        framework.excel_path = payload.excel_path
+        db.commit()
+        db.refresh(framework)
     job = Job(kind="review_generation", entity_id=framework.id, status="pending", message="Queued")
     db.add(job)
     db.commit()
     db.refresh(job)
-    enqueue_job(db, job.id, "review_generation")
+    if payload.deepseek_api_key:
+        from ..services.reviews import generate_review
+        from ..models import now
+
+        job.status = "running"
+        job.started_at = now()
+        job.progress = 10
+        db.commit()
+        try:
+            output = generate_review(
+                db,
+                framework,
+                transient_deepseek_api_key=payload.deepseek_api_key,
+            )
+            job.progress = 100
+            job.status = "succeeded"
+            job.result = {"review_output_id": output.id}
+            job.finished_at = now()
+            job.message = "Review generated"
+            db.commit()
+        except Exception as exc:
+            db.rollback()
+            job = db.get(Job, job.id)
+            job.status = "failed"
+            job.error = str(exc)
+            job.finished_at = now()
+            db.commit()
+    else:
+        enqueue_job(db, job.id, "review_generation")
     db.refresh(job)
     return job
 

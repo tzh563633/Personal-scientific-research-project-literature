@@ -24,6 +24,7 @@ from ..schemas import (
     FileTreeResponse,
     GitCommitResponse,
     GitCommitDetailResponse,
+    GitBranchResponse,
     GitDiffResponse,
     GitStatusResponse,
     VulnerabilityResponse,
@@ -384,6 +385,64 @@ def git_status(project: CodeProject) -> GitStatusResponse:
     )
 
 
+def _validate_branch_name(value: str) -> str:
+    name = value.strip()
+    if (
+        not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._/-]{0,99}", name)
+        or name.startswith(("-", ".", "/"))
+        or name.endswith((".", "/"))
+        or ".." in name
+        or "@{" in name
+        or "//" in name
+        or name.endswith(".lock")
+    ):
+        raise ValueError("Invalid Git branch name")
+    return name
+
+
+def git_branches(project: CodeProject) -> list[GitBranchResponse]:
+    root = project_directory(project)
+    if not (root / ".git").exists():
+        return []
+    try:
+        current = _run_git(root, ["symbolic-ref", "--quiet", "--short", "HEAD"]).strip()
+    except RuntimeError:
+        current = ""
+    output = _run_git(
+        root,
+        [
+            "for-each-ref",
+            "--format=%(refname:short)\t%(objectname:short)",
+            "refs/heads",
+        ],
+    )
+    branches = []
+    for line in output.splitlines():
+        name, separator, commit_hash = line.partition("\t")
+        if separator and name:
+            branches.append(
+                GitBranchResponse(
+                    name=name,
+                    commit_hash=commit_hash,
+                    current=name == current,
+                )
+            )
+    return branches
+
+
+def git_create_branch(project: CodeProject, name: str, from_branch: str | None = None) -> GitBranchResponse:
+    root = project_directory(project)
+    if not (root / ".git").exists():
+        raise ValueError("Git repository not found")
+    branch_name = _validate_branch_name(name)
+    arguments = ["branch", branch_name]
+    if from_branch:
+        arguments.append(_validate_branch_name(from_branch))
+    _run_git_mutating(root, arguments)
+    commit_hash = _run_git(root, ["rev-parse", "--short", branch_name]).strip()
+    return GitBranchResponse(name=branch_name, commit_hash=commit_hash, current=False)
+
+
 def git_commits(project: CodeProject, limit: int = 20) -> list[GitCommitResponse]:
     root = project_directory(project)
     if not (root / ".git").exists():
@@ -502,6 +561,36 @@ def _run_git(root: Path, arguments: list[str]) -> str:
     result = subprocess.run(
         ["git", "-c", "core.fsmonitor=false", "--no-pager", "--no-optional-locks", *arguments],
         cwd=root,
+        shell=False,
+        capture_output=True,
+        text=True,
+        timeout=15,
+        check=False,
+    )
+    if result.returncode != 0:
+        message = result.stderr.strip() or "Git command failed"
+        raise RuntimeError(message)
+    return result.stdout
+
+
+def _run_git_mutating(root: Path, arguments: list[str]) -> str:
+    hooks_path = settings.storage_path / ".disabled-git-hooks"
+    hooks_path.mkdir(parents=True, exist_ok=True)
+    environment = os.environ.copy()
+    environment["GIT_CONFIG_NOSYSTEM"] = "1"
+    result = subprocess.run(
+        [
+            "git",
+            "-c",
+            "core.hooksPath=" + str(hooks_path),
+            "-c",
+            "core.fsmonitor=false",
+            "--no-pager",
+            "--no-optional-locks",
+            *arguments,
+        ],
+        cwd=root,
+        env=environment,
         shell=False,
         capture_output=True,
         text=True,

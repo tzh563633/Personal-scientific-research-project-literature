@@ -17,6 +17,8 @@ from ..schemas import (
     DependencyAnalysisResponse,
     FilePreviewResponse,
     FileTreeResponse,
+    GitBranchCreateRequest,
+    GitBranchResponse,
     GitCommitResponse,
     GitCommitDetailResponse,
     GitDiffResponse,
@@ -27,6 +29,8 @@ from ..services.code_analysis import (
     analyze_dependencies,
     audit_project_security,
     git_commit_detail,
+    git_branches,
+    git_create_branch,
     git_commits,
     git_diff,
     git_status,
@@ -93,6 +97,33 @@ def get_git_status(project_id: int, db: Session = Depends(get_db), _: User = Dep
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
     return git_status(project)
+
+
+@router.get("/projects/{project_id}/git/branches", response_model=list[GitBranchResponse])
+def list_git_branches(project_id: int, db: Session = Depends(get_db), _: User = Depends(get_current_user)):
+    project = db.get(CodeProject, project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    try:
+        return git_branches(project)
+    except (ValueError, FileNotFoundError, RuntimeError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.post("/projects/{project_id}/git/branches", response_model=GitBranchResponse)
+def create_git_branch(
+    project_id: int,
+    payload: GitBranchCreateRequest,
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    project = db.get(CodeProject, project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    try:
+        return git_create_branch(project, payload.name, payload.from_branch)
+    except (ValueError, FileNotFoundError, RuntimeError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 @router.get("/projects/{project_id}/tree", response_model=FileTreeResponse)

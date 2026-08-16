@@ -105,6 +105,13 @@ class ExcelUpdateResponse(ORMModel):
     created_at: datetime
 
 
+class ExcelFileResponse(BaseModel):
+    name: str
+    path: str
+    size_bytes: int
+    modified_at: datetime
+
+
 class JournalCreate(BaseModel):
     name: str = Field(min_length=1, max_length=200)
     url: str | None = None
@@ -259,6 +266,78 @@ class GitCommitDetailResponse(BaseModel):
     patch: str = ""
     truncated: bool = False
     error: str | None = None
+
+
+class GitBranchResponse(BaseModel):
+    name: str
+    commit_hash: str
+    current: bool = False
+
+
+class GitBranchCreateRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=100)
+    from_branch: str | None = Field(default=None, max_length=100)
+
+
+class ResearchMethodCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=200)
+    description: str | None = None
+    use_cases: str | None = None
+    steps: str | None = None
+    advantages: str | None = None
+    limitations: str | None = None
+    related_project_id: int | None = None
+    related_paper_id: int | None = None
+
+
+class ResearchMethodResponse(ORMModel):
+    id: int
+    name: str
+    description: str | None = None
+    use_cases: str | None = None
+    steps: str | None = None
+    advantages: str | None = None
+    limitations: str | None = None
+    related_project_id: int | None = None
+    related_paper_id: int | None = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class ResearchToolCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=200)
+    purpose: str | None = None
+    installation: str | None = None
+    usage: str | None = None
+    cautions: str | None = None
+    related_project_id: int | None = None
+
+
+class ResearchToolResponse(ORMModel):
+    id: int
+    name: str
+    purpose: str | None = None
+    installation: str | None = None
+    usage: str | None = None
+    cautions: str | None = None
+    related_project_id: int | None = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class ResearchWorkflowCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=200)
+    description: str | None = None
+    steps: list[str] = Field(default_factory=list)
+
+
+class ResearchWorkflowResponse(ORMModel):
+    id: int
+    name: str
+    description: str | None = None
+    steps: list[str] = Field(default_factory=list)
+    created_at: datetime
+    updated_at: datetime
 
 
 class DependencyResponse(BaseModel):
@@ -435,17 +514,21 @@ class ConfigResponse(RootModel[dict[str, Any]]):
 class FrameworkCreate(BaseModel):
     name: str = Field(min_length=1, max_length=200)
     content: str = Field(min_length=1)
+    excel_path: str | None = Field(default=None, max_length=500)
 
 
 class FrameworkResponse(ORMModel):
     id: int
     name: str
     content: str
+    excel_path: str | None = None
     created_at: datetime
 
 
 class ReviewGenerateRequest(BaseModel):
     framework_id: int
+    excel_path: str | None = Field(default=None, max_length=500)
+    deepseek_api_key: str | None = Field(default=None, max_length=4096)
 
 
 class ReviewOutputResponse(ORMModel):
@@ -453,6 +536,10 @@ class ReviewOutputResponse(ORMModel):
     framework_id: int | None = None
     content: str
     missing_pdf_md_path: str | None = None
+    source_count: int = 0
+    verified_source_count: int = 0
+    full_text_source_count: int = 0
+    fact_check_summary: dict[str, Any] | None = None
     created_at: datetime
 
 
