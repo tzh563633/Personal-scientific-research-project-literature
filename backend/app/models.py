@@ -103,6 +103,8 @@ class ExcelUpdate(Base):
     update_time: Mapped[datetime] = mapped_column(DateTime, default=now)
     status: Mapped[str] = mapped_column(String(20))
     added_count: Mapped[int] = mapped_column(Integer, default=0)
+    paper_count: Mapped[int] = mapped_column(Integer, default=0)
+    preserved_manual_count: Mapped[int] = mapped_column(Integer, default=0)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=now)
 
@@ -125,6 +127,10 @@ class Journal(Base):
     rss_url: Mapped[str | None] = mapped_column(Text, nullable=True)
     language: Mapped[str | None] = mapped_column(String(10), nullable=True)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    last_checked_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    last_success_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    last_item_count: Mapped[int] = mapped_column(Integer, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=now)
 
 
@@ -209,6 +215,7 @@ class AgentJob(Base):
     __tablename__ = "agent_jobs"
     id: Mapped[int] = mapped_column(primary_key=True)
     command_id: Mapped[int | None] = mapped_column(ForeignKey("commands.id"), nullable=True)
+    job_id: Mapped[int | None] = mapped_column(ForeignKey("jobs.id"), nullable=True)
     agent_id: Mapped[int | None] = mapped_column(ForeignKey("agents.id"), nullable=True)
     kind: Mapped[str] = mapped_column(String(50))
     payload: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
@@ -217,6 +224,37 @@ class AgentJob(Base):
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=now)
     claimed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+
+class PaperFolder(Base):
+    __tablename__ = "paper_folders"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String(200))
+    path: Mapped[str] = mapped_column(Text)
+    recursive: Mapped[bool] = mapped_column(Boolean, default=True)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    last_scan_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    last_scan_job_id: Mapped[int | None] = mapped_column(ForeignKey("jobs.id"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=now, onupdate=now)
+
+
+class FolderDocument(Base):
+    __tablename__ = "folder_documents"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    folder_id: Mapped[int] = mapped_column(ForeignKey("paper_folders.id", ondelete="CASCADE"))
+    relative_path: Mapped[str] = mapped_column(Text)
+    file_name: Mapped[str] = mapped_column(Text)
+    size_bytes: Mapped[int] = mapped_column(Integer)
+    modified_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    sha256: Mapped[str] = mapped_column(String(64), index=True)
+    paper_id: Mapped[int | None] = mapped_column(ForeignKey("papers.id"), nullable=True)
+    parse_job_id: Mapped[int | None] = mapped_column(ForeignKey("jobs.id"), nullable=True)
+    import_status: Mapped[str] = mapped_column(String(20), default="discovered")
+    parse_status: Mapped[str] = mapped_column(String(20), default="pending")
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=now, onupdate=now)
 
 
 class ReviewFramework(Base):

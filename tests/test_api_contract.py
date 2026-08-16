@@ -5,6 +5,7 @@ def test_json_api_routes_have_explicit_response_models():
     binary_routes = {
         ("/api/v1/excel/download", "GET"),
         ("/api/v1/papers/{paper_id}/files/{file_id}", "GET"),
+        ("/api/v1/agent/folders/{folder_id}/documents", "POST"),
     }
     missing = []
     for path, operations in app.openapi()["paths"].items():
@@ -32,6 +33,7 @@ def test_agent_contracts_are_modelled():
         ("POST", "/api/v1/agent/execute"),
         ("POST", "/api/v1/agent/jobs/claim"),
         ("POST", "/api/v1/agent/jobs/{job_id}/result"),
+        ("POST", "/api/v1/agent/folders/{folder_id}/documents"),
     }
     actual = {
         (method.upper(), path)

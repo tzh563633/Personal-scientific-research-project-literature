@@ -89,6 +89,7 @@ def monitor_journals(db: Session) -> dict:
     matched = 0
     errors: list[str] = []
     for journal in db.query(Journal).filter(Journal.enabled.is_(True)).all():
+        checked_at = datetime.utcnow()
         try:
             items = _fetch_items(journal)
             keywords = db.query(Keyword).filter(Keyword.journal_id == journal.id).all()
@@ -122,8 +123,17 @@ def monitor_journals(db: Session) -> dict:
                     db.commit()
                     send_alert_notifications(db, alert)
                     matched += 1
+            journal.last_checked_at = checked_at
+            journal.last_success_at = checked_at
+            journal.last_error = None
+            journal.last_item_count = len(items)
             db.commit()
         except Exception as exc:
             db.rollback()
+            refreshed = db.get(Journal, journal.id)
+            if refreshed:
+                refreshed.last_checked_at = checked_at
+                refreshed.last_error = str(exc)
+                db.commit()
             errors.append(f"{journal.name}: {exc}")
     return {"created": created, "matched": matched, "errors": errors}

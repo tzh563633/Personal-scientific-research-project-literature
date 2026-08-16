@@ -3,10 +3,11 @@ from sqlalchemy.orm import Session
 
 from ..db import get_db
 from ..dependencies import get_current_user
-from ..models import Alert, Journal, Job, Keyword, User
+from ..models import Alert, Journal, JournalItem, Job, Keyword, User
 from ..schemas import (
     AlertResponse,
     JournalCreate,
+    JournalItemResponse,
     JournalResponse,
     KeywordCreate,
     KeywordResponse,
@@ -14,7 +15,6 @@ from ..schemas import (
     OkResponse,
 )
 from ..services.journals import monitor_journals
-from ..schemas import JobResponse
 from ..worker import enqueue_job
 
 router = APIRouter(prefix="/journals", tags=["journals"])
@@ -36,6 +36,54 @@ def create_journal(
     db.commit()
     db.refresh(journal)
     return journal
+
+
+@router.get("/items", response_model=list[JournalItemResponse])
+def list_journal_items(
+    limit: int = 100,
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    limit = max(1, min(limit, 500))
+    rows = (
+        db.query(JournalItem, Journal.name)
+        .join(Journal, Journal.id == JournalItem.journal_id)
+        .order_by(JournalItem.created_at.desc())
+        .limit(limit)
+        .all()
+    )
+    return [
+        {
+            "id": item.id,
+            "journal_id": item.journal_id,
+            "journal_name": journal_name,
+            "title": item.title,
+            "authors": item.authors,
+            "abstract": item.abstract,
+            "url": item.url,
+            "doi": item.doi,
+            "published_at": item.published_at,
+            "fingerprint": item.fingerprint,
+            "created_at": item.created_at,
+        }
+        for item, journal_name in rows
+    ]
+
+
+@router.get("/alerts", response_model=list[AlertResponse])
+def list_alerts(db: Session = Depends(get_db), _: User = Depends(get_current_user)):
+    return db.query(Alert).order_by(Alert.created_at.desc()).limit(100).all()
+
+
+@router.post("/monitor/run", response_model=JobResponse)
+def run_monitor(db: Session = Depends(get_db), _: User = Depends(get_current_user)):
+    job = Job(kind="journal_monitor", status="pending", message="Queued")
+    db.add(job)
+    db.commit()
+    db.refresh(job)
+    enqueue_job(db, job.id, "journal_monitor")
+    db.refresh(job)
+    return job
 
 
 @router.put("/{journal_id}", response_model=JournalResponse)
@@ -105,19 +153,3 @@ def delete_keyword(
     db.delete(keyword)
     db.commit()
     return OkResponse()
-
-
-@router.post("/monitor/run", response_model=JobResponse)
-def run_monitor(db: Session = Depends(get_db), _: User = Depends(get_current_user)):
-    job = Job(kind="journal_monitor", status="pending", message="Queued")
-    db.add(job)
-    db.commit()
-    db.refresh(job)
-    enqueue_job(db, job.id, "journal_monitor")
-    db.refresh(job)
-    return job
-
-
-@router.get("/alerts", response_model=list[AlertResponse])
-def list_alerts(db: Session = Depends(get_db), _: User = Depends(get_current_user)):
-    return db.query(Alert).order_by(Alert.created_at.desc()).limit(100).all()

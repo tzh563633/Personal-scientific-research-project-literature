@@ -9,7 +9,7 @@ import logging
 from .config import settings
 from .db import Base, engine
 from .logging_setup import configure_logging
-from .routers import agent, auth, code, commands, dashboard, excel, jobs, journals, monitor, papers, reviews, setup, system
+from .routers import agent, auth, code, commands, dashboard, excel, folders, jobs, journals, monitor, papers, reviews, setup, system
 from . import models  # noqa: F401
 
 
@@ -35,6 +35,7 @@ app.include_router(setup.router, prefix="/api/v1")
 app.include_router(jobs.router, prefix="/api/v1")
 app.include_router(papers.router, prefix="/api/v1")
 app.include_router(excel.router, prefix="/api/v1")
+app.include_router(folders.router, prefix="/api/v1")
 app.include_router(journals.router, prefix="/api/v1")
 app.include_router(monitor.router, prefix="/api/v1")
 app.include_router(code.router, prefix="/api/v1")

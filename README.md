@@ -35,11 +35,20 @@ P4 product requirements and architecture are recorded in
 The P4 final acceptance report is recorded in
 [docs/p4-final-report.md](docs/p4-final-report.md).
 
+P5 plan and acceptance criteria are tracked in
+[docs/p5-plan-and-acceptance.md](docs/p5-plan-and-acceptance.md).
+
+The P5 final acceptance report is recorded in
+[docs/p5-final-report.md](docs/p5-final-report.md).
+
 The host Agent is optional for business workflows that need a Windows process:
 
 ```powershell
 python -m agent.agent --base-url http://localhost:8000 --token "$env:AGENT_TOKEN"
 ```
+
+For a click-through Windows installation, double-click
+`installer\Install-ResearchPlatform.cmd`, then click **Install and Run**.
 
 ## Local development
 

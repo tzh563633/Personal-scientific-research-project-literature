@@ -16,6 +16,7 @@ from backend.app.services.llm import MockLLMProvider
 from backend.app.services import papers as papers_service
 from backend.app.services.crypto import decrypt_secret, encrypt_secret
 from backend.app.services.files import safe_extract_archive
+from backend.app.services.folders import validate_host_folder_path, validate_relative_path
 from backend.app.services.network import validate_public_url
 from backend.app.services.papers import _parse_citations, _parse_references
 
@@ -191,3 +192,18 @@ def test_excel_preserves_manual_visible_edits(tmp_path: Path, monkeypatch):
         workbook = load_workbook(workbook_path)
         assert workbook["Papers"].cell(2, 2).value == "Human-edited title"
         assert db.query(models.ManualEdit).count() == 1
+
+
+def test_folder_path_validation_requires_absolute_paths():
+    assert validate_host_folder_path(r"D:\research\papers") == r"D:\research\papers"
+    assert validate_relative_path(r"nested\paper.pdf") == "nested/paper.pdf"
+    for value in ("relative/path", "", "../paper.pdf"):
+        try:
+            if value.endswith(".pdf"):
+                validate_relative_path(value)
+            else:
+                validate_host_folder_path(value)
+        except ValueError:
+            pass
+        else:
+            raise AssertionError(f"unsafe folder path accepted: {value}")

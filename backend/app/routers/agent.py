@@ -1,10 +1,11 @@
-from fastapi import APIRouter, Header, HTTPException
+from fastapi import APIRouter, File, Form, Header, HTTPException, UploadFile
 from sqlalchemy.orm import Session
 
 from ..config import settings
 from ..db import SessionLocal
-from ..models import Agent, AgentJob, Command, now
+from ..models import Agent, AgentJob, Command, Job, PaperFolder, now
 from ..schemas import (
+    AgentFolderDocumentResponse,
     AgentClaimRequest,
     AgentClaimResponse,
     AgentExecuteRequest,
@@ -36,7 +37,7 @@ def register(
 ):
     check_token(x_agent_token)
     payload = payload or AgentRegisterRequest(
-        capabilities=["backup", "update_excel", "monitor_journals", "generate_review"]
+        capabilities=["backup", "update_excel", "monitor_journals", "generate_review", "scan_folder"]
     )
     db: Session = SessionLocal()
     try:
@@ -55,6 +56,40 @@ def register(
             agent_id=agent.id,
             capabilities=agent.capabilities or [],
         )
+    finally:
+        db.close()
+
+
+@router.post("/folders/{folder_id}/documents", response_model=AgentFolderDocumentResponse)
+async def upload_folder_document(
+    folder_id: int,
+    file: UploadFile = File(...),
+    relative_path: str = Form(...),
+    sha256: str | None = Form(default=None),
+    modified_at: str | None = Form(default=None),
+    x_agent_token: str | None = Header(default=None),
+):
+    check_token(x_agent_token)
+    db: Session = SessionLocal()
+    try:
+        folder = db.get(PaperFolder, folder_id)
+        if not folder:
+            raise HTTPException(status_code=404, detail="Folder not found")
+        if not folder.enabled:
+            raise HTTPException(status_code=400, detail="Folder is disabled")
+        from ..services.folders import ingest_agent_document
+
+        document, duplicate = await ingest_agent_document(
+            db,
+            folder,
+            file,
+            relative_path=relative_path,
+            submitted_sha256=sha256,
+            modified_at=modified_at,
+        )
+        return AgentFolderDocumentResponse(document=document, duplicate=duplicate)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     finally:
         db.close()
 
@@ -156,6 +191,21 @@ def result(
         job.status = "succeeded" if payload.ok else "failed"
         job.result = payload.model_dump(exclude_none=True)
         job.error = payload.error
+        if job.job_id:
+            platform_job = db.get(Job, job.job_id)
+            if platform_job:
+                platform_job.status = "succeeded" if payload.ok else "failed"
+                platform_job.progress = 100 if payload.ok else platform_job.progress
+                platform_job.result = payload.result or {}
+                platform_job.error = payload.error
+                platform_job.message = "Folder scan completed" if payload.ok else "Folder scan failed"
+                platform_job.finished_at = now()
+                folder_id = platform_job.entity_id
+                if folder_id:
+                    folder = db.get(PaperFolder, folder_id)
+                    if folder:
+                        folder.last_scan_at = now()
+                        folder.updated_at = now()
         if job.command_id:
             command = db.get(Command, job.command_id)
             if command:

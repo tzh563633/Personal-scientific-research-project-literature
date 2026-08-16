@@ -11,7 +11,7 @@ import httpx
 from sqlalchemy.orm import Session
 
 from ..config import settings
-from ..models import CitationLink, Job, Paper, PaperFile, PaperReference, now
+from ..models import CitationLink, FolderDocument, Job, Paper, PaperFile, PaperReference, now
 from .files import absolute_storage_path, guess_mime, relative_storage_path, sha256_path
 from .llm import get_provider
 
@@ -357,6 +357,10 @@ def process_paper(db: Session, job_id: int) -> None:
             )
         paper.status = "processed"
         paper.updated_at = now()
+        for document in db.query(FolderDocument).filter(FolderDocument.paper_id == paper.id).all():
+            document.parse_status = "processed"
+            document.error = None
+            document.updated_at = now()
         job.progress = 100
         job.status = "succeeded"
         job.message = "Paper processed"
@@ -370,4 +374,8 @@ def process_paper(db: Session, job_id: int) -> None:
             job.status = "failed"
             job.error = str(exc)
             job.finished_at = now()
+            for document in db.query(FolderDocument).filter(FolderDocument.parse_job_id == job_id).all():
+                document.parse_status = "failed"
+                document.error = str(exc)
+                document.updated_at = now()
             db.commit()

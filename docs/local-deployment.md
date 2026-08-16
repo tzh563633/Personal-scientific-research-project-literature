@@ -15,6 +15,23 @@ From the project root:
 .\scripts\deploy-local.ps1
 ```
 
+## Click-Through Installation
+
+For installation on another Windows machine, open the project installation
+folder and double-click:
+
+```text
+installer\Install-ResearchPlatform.cmd
+```
+
+The installer opens a Windows form. Click **Install and Run** to copy the
+project to `%LOCALAPPDATA%\ResearchControlPlatform`, exclude `.git`, `.env`,
+storage data and build caches, create local secrets, create the Desktop
+shortcut, start Docker Compose, start the host Agent, wait for health checks,
+and open the platform. If Docker Desktop is missing, the installer attempts
+to use `winget`; a required restart or administrator action is reported
+instead of being treated as a successful installation.
+
 For the one-click desktop workflow, create a Windows shortcut once:
 
 ```powershell

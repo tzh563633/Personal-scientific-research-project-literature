@@ -99,6 +99,8 @@ class ExcelUpdateResponse(ORMModel):
     update_time: datetime
     status: str
     added_count: int
+    paper_count: int = 0
+    preserved_manual_count: int = 0
     error_message: str | None = None
     created_at: datetime
 
@@ -118,6 +120,10 @@ class JournalResponse(ORMModel):
     rss_url: str | None = None
     language: str | None = None
     enabled: bool
+    last_checked_at: datetime | None = None
+    last_success_at: datetime | None = None
+    last_error: str | None = None
+    last_item_count: int = 0
     created_at: datetime
 
 
@@ -142,6 +148,72 @@ class AlertResponse(ORMModel):
     paper_url: str | None = None
     matched_keywords: str | None = None
     created_at: datetime
+
+
+class JournalItemResponse(ORMModel):
+    id: int
+    journal_id: int
+    journal_name: str | None = None
+    title: str
+    authors: str | None = None
+    abstract: str | None = None
+    url: str | None = None
+    doi: str | None = None
+    published_at: datetime | None = None
+    fingerprint: str
+    created_at: datetime
+
+
+class JournalMonitorSummaryResponse(BaseModel):
+    checked_at: datetime
+    created: int = 0
+    matched: int = 0
+    errors: list[str] = Field(default_factory=list)
+
+
+class FolderCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=200)
+    path: str = Field(min_length=1, max_length=2048)
+    recursive: bool = True
+    enabled: bool = True
+
+
+class FolderResponse(ORMModel):
+    id: int
+    name: str
+    path: str
+    recursive: bool
+    enabled: bool
+    last_scan_at: datetime | None = None
+    last_scan_job_id: int | None = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class FolderScanRequest(BaseModel):
+    max_files: int = Field(default=500, ge=1, le=5000)
+
+
+class FolderDocumentResponse(ORMModel):
+    id: int
+    folder_id: int
+    relative_path: str
+    file_name: str
+    size_bytes: int
+    modified_at: datetime | None = None
+    sha256: str
+    paper_id: int | None = None
+    parse_job_id: int | None = None
+    import_status: str
+    parse_status: str
+    error: str | None = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class AgentFolderDocumentResponse(BaseModel):
+    document: FolderDocumentResponse
+    duplicate: bool = False
 
 
 class CodeProjectResponse(ORMModel):

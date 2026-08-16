@@ -115,6 +115,8 @@ def generate_excel(db: Session) -> ExcelUpdate:
         workbook.save(EXCEL_PATH)
         update.status = "succeeded"
         update.added_count = len(changed_ids)
+        update.preserved_manual_count = len(changed_ids)
+        update.paper_count = db.query(Paper).count()
         update.error_message = None
         db.commit()
         return update

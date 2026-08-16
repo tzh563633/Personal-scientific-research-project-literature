@@ -17,6 +17,12 @@ API 前缀为 `/api/v1`，Swagger 文档位于 `/docs`。
 - `GET /papers/{id}`
 - `PATCH /papers/{id}`
 - `GET /papers/{id}/files`
+- `GET /folders`
+- `POST /folders`
+- `PUT /folders/{id}`
+- `DELETE /folders/{id}`
+- `GET /folders/{id}/documents`
+- `POST /folders/{id}/scan`
 - `GET /jobs/{id}`
 - `POST /jobs/{id}/cancel`
 
@@ -24,6 +30,8 @@ API 前缀为 `/api/v1`，Swagger 文档位于 `/docs`。
 
 - `/excel`
 - `/journals`
+- `GET /journals/items`
+- `GET /journals/alerts`
 - `/code`
 - `GET /code/projects/{id}/tree?path=...`
 - `GET /code/projects/{id}/files/preview?path=...`
@@ -39,6 +47,7 @@ API 前缀为 `/api/v1`，Swagger 文档位于 `/docs`。
 - `GET /reviews/outputs/{id}/sources`
 - `/system`
 - `/agent`
+- `POST /agent/folders/{id}/documents` (multipart PDF upload from the host Agent)
 - `GET /dashboard/overview`
 - `GET /jobs/{id}` and `POST /jobs/{id}/cancel` use the common job status
   values `pending`, `running`, `succeeded`, `failed`, and `cancelled`.
